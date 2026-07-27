@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>موجَک | Motiva — هوش پشت هر حرکت</title>
+<meta name="description" content="پلتفرم هوش مصنوعی برای ناوبری، هماهنگی و بهینه‌سازی ناوگان ربات‌های خودران (AMR) در کارخانه و انبار.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: '#0B1220',
+          panel: '#141B2E',
+          signal: '#22D3EE',
+          motion: '#6366F1',
+          action: '#F59E0B',
+        },
+        fontFamily: {
+          fa: ['Vazirmatn', 'Tahoma', 'sans-serif'],
+        }
+      }
+    }
+  }
+</script>
+<style>
+  body { font-family: 'Vazirmatn', Tahoma, sans-serif; }
+  .grad-text {
+    background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .grad-bg {
+    background: linear-gradient(135deg, #22D3EE 0%, #6366F1 100%);
+  }
+  .grad-border {
+    border-image: linear-gradient(135deg, #22D3EE, #6366F1) 1;
+  }
+</style>
+</head>
+<body class="bg-ink text-gray-200 antialiased">
+
+<!-- Header -->
+<header class="sticky top-0 z-50 bg-ink/90 backdrop-blur border-b border-white/10">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <svg viewBox="0 0 120 120" class="w-9 h-9">
+        <defs>
+          <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#22D3EE"/>
+            <stop offset="100%" stop-color="#6366F1"/>
+          </linearGradient>
+        </defs>
+        <rect width="120" height="120" rx="26" fill="#141B2E"/>
+        <path d="M22 92 C 40 92, 46 70, 60 60" fill="none" stroke="url(#g1)" stroke-width="7" stroke-linecap="round"/>
+        <path d="M98 92 C 80 92, 74 70, 60 60" fill="none" stroke="url(#g1)" stroke-width="7" stroke-linecap="round" opacity="0.85"/>
+        <path d="M60 22 C 60 38, 60 46, 60 60" fill="none" stroke="url(#g1)" stroke-width="7" stroke-linecap="round" opacity="0.7"/>
+        <circle cx="22" cy="92" r="6" fill="#22D3EE"/>
+        <circle cx="98" cy="92" r="6" fill="#6366F1"/>
+        <circle cx="60" cy="22" r="6" fill="#22D3EE"/>
+        <circle cx="60" cy="60" r="12" fill="url(#g1)"/>
+      </svg>
+      <div class="leading-tight">
+        <div class="font-extrabold text-lg text-white">موجَک <span class="text-gray-500 font-normal">| Motiva</span></div>
+      </div>
+    </div>
+    <nav class="hidden md:flex items-center gap-8 text-sm text-gray-300">
+      <a href="#problem" class="hover:text-white transition">مسئله</a>
+      <a href="#solution" class="hover:text-white transition">راه‌حل</a>
+      <a href="#how" class="hover:text-white transition">فناوری</a>
+      <a href="#market" class="hover:text-white transition">بازار</a>
+      <a href="#contact" class="hover:text-white transition">تماس</a>
+    </nav>
+    <a href="#contact" class="text-sm font-bold bg-action text-ink px-5 py-2.5 rounded-lg hover:brightness-110 transition">درخواست دمو</a>
+  </div>
+</header>
+
+<!-- Hero -->
+<section class="relative overflow-hidden">
+  <div class="absolute inset-0 pointer-events-none">
+    <div class="absolute -top-40 -left-40 w-[500px] h-[500px] bg-motion/20 rounded-full blur-3xl"></div>
+    <div class="absolute -bottom-40 -right-20 w-[500px] h-[500px] bg-signal/10 rounded-full blur-3xl"></div>
+  </div>
+  <div class="relative max-w-5xl mx-auto px-6 pt-20 pb-24 text-center">
+    <span class="inline-block text-xs font-bold tracking-wide text-signal border border-signal/30 bg-signal/10 rounded-full px-4 py-1.5 mb-6">
+      زیرساخت هوشمند Industrial Mobility
+    </span>
+    <h1 class="text-4xl md:text-6xl font-extrabold text-white leading-tight mb-6">
+      <span class="grad-text">هوش پشت هر حرکت</span>
+    </h1>
+    <p class="text-lg md:text-xl text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
+      موجَک ناوگان ربات‌های خودران (AMR) شما را در محیط پویای کارخانه و انبار هدایت، هماهنگ و بهینه می‌کند —
+      بدون مسیر ثابت، بدون زیرساخت سنگین، با یادگیری مداوم از جریان واقعی مواد.
+    </p>
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+      <a href="#contact" class="w-full sm:w-auto text-center font-bold bg-action text-ink px-8 py-3.5 rounded-lg hover:brightness-110 transition">
+        درخواست دمو برای کارخانه شما
+      </a>
+      <a href="#solution" class="w-full sm:w-auto text-center font-bold border border-white/20 text-white px-8 py-3.5 rounded-lg hover:bg-white/5 transition">
+        دیدن راه‌حل ↓
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- Problem -->
+<section id="problem" class="border-t border-white/10 bg-panel/40">
+  <div class="max-w-6xl mx-auto px-6 py-20">
+    <div class="grid md:grid-cols-2 gap-12 items-start">
+      <div>
+        <span class="text-xs font-bold text-action">مسئله #۰۸۴</span>
+        <h2 class="text-3xl md:text-4xl font-extrabold text-white mt-3 mb-6 leading-snug">
+          جابه‌جایی داخلی هنوز دستی یا وابسته به مسیر ثابت است
+        </h2>
+        <p class="text-gray-400 leading-relaxed mb-6">
+          در کارخانه و انبار، بخش بزرگی از عملیات صرف جابه‌جایی مواد، پالت و محصول بین ایستگاه‌ها می‌شود.
+          AGVهای قدیمی به خط مغناطیسی و مسیر ثابت وابسته‌اند — اما محیط صنعتی پویاست: مسیرها تغییر می‌کنند،
+          افراد و لیفتراک‌ها در حرکت‌اند، چیدمان کالا عوض می‌شود.
+        </p>
+        <p class="text-gray-400 leading-relaxed">
+          نتیجه: اتلاف زمان اپراتور، خطای انسانی، برخورد تجهیزات، و گلوگاه عملیاتی در ساعات پرترافیک.
+        </p>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div class="bg-ink border border-white/10 rounded-xl p-6">
+          <div class="text-3xl font-extrabold text-signal mb-2">دستی</div>
+          <div class="text-sm text-gray-400">حمل‌ونقل داخلی هنوز عمدتاً با نیروی انسانی و لیفتراک انجام می‌شود</div>
+        </div>
+        <div class="bg-ink border border-white/10 rounded-xl p-6">
+          <div class="text-3xl font-extrabold text-motion mb-2">ثابت</div>
+          <div class="text-sm text-gray-400">AGVهای مسیر مغناطیسی در برابر تغییر چیدمان و ترافیک ضعیف عمل می‌کنند</div>
+        </div>
+        <div class="bg-ink border border-white/10 rounded-xl p-6">
+          <div class="text-3xl font-extrabold text-action mb-2">پرخطا</div>
+          <div class="text-sm text-gray-400">خطای انسانی و برخورد تجهیزات در محیط شلوغ و پویا بالاست</div>
+        </div>
+        <div class="bg-ink border border-white/10 rounded-xl p-6">
+          <div class="text-3xl font-extrabold text-white mb-2">گلوگاه</div>
+          <div class="text-sm text-gray-400">در ساعات پرترافیک، جریان مواد کند و خط تولید متأثر می‌شود</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Solution -->
+<section id="solution" class="border-t border-white/10">
+  <div class="max-w-6xl mx-auto px-6 py-20">
+    <div class="text-center max-w-2xl mx-auto mb-14">
+      <span class="text-xs font-bold text-signal">راه‌حل</span>
+      <h2 class="text-3xl md:text-4xl font-extrabold text-white mt-3 mb-4">
+        لایه هوشمند بالای ربات‌های خودران
+      </h2>
+      <p class="text-gray-400 leading-relaxed">
+        ارزش اصلی نه فقط در خود ربات، بلکه در هوشی است که آن را هدایت می‌کند —
+        ناوبری پویا، بهینه‌سازی جریان مواد، و مدیریت هم‌زمان صدها ربات.
+      </p>
+    </div>
+    <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div class="bg-panel border border-white/10 rounded-2xl p-6 hover:border-signal/40 transition">
+        <div class="w-11 h-11 rounded-lg grad-bg mb-5 flex items-center justify-center text-ink font-bold">۱</div>
+        <h3 class="font-bold text-white mb-2">ناوبری خودران پویا</h3>
+        <p class="text-sm text-gray-400 leading-relaxed">حرکت بدون مسیر ثابت، تشخیص لحظه‌ای موانع و بازطراحی مسیر در محیط زنده کارخانه</p>
+      </div>
+      <div class="bg-panel border border-white/10 rounded-2xl p-6 hover:border-signal/40 transition">
+        <div class="w-11 h-11 rounded-lg grad-bg mb-5 flex items-center justify-center text-ink font-bold">۲</div>
+        <h3 class="font-bold text-white mb-2">بهینه‌سازی جریان مواد</h3>
+        <p class="text-sm text-gray-400 leading-relaxed">شناسایی گلوگاه‌های لجستیکی و بازتخصیص هوشمند مأموریت‌ها برای کمترین زمان انتظار</p>
+      </div>
+      <div class="bg-panel border border-white/10 rounded-2xl p-6 hover:border-signal/40 transition">
+        <div class="w-11 h-11 rounded-lg grad-bg mb-5 flex items-center justify-center text-ink font-bold">۳</div>
+        <h3 class="font-bold text-white mb-2">مدیریت ناوگان</h3>
+        <p class="text-sm text-gray-400 leading-relaxed">هماهنگی هم‌زمان صدها ربات، زمان‌بندی شارژ، و توزیع بار عملیاتی بین آن‌ها</p>
+      </div>
+      <div class="bg-panel border border-white/10 rounded-2xl p-6 hover:border-signal/40 transition">
+        <div class="w-11 h-11 rounded-lg grad-bg mb-5 flex items-center justify-center text-ink font-bold">۴</div>
+        <h3 class="font-bold text-white mb-2">یکپارچگی ERP/WMS/MES</h3>
+        <p class="text-sm text-gray-400 leading-relaxed">اتصال مستقیم به سیستم‌های موجود کارخانه؛ بدون تغییر در فرآیندهای بالادستی</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section id="how" class="border-t border-white/10 bg-panel/40">
+  <div class="max-w-5xl mx-auto px-6 py-20">
+    <div class="text-center max-w-2xl mx-auto mb-14">
+      <span class="text-xs font-bold text-motion">مسیر رشد محصول</span>
+      <h2 class="text-3xl md:text-4xl font-extrabold text-white mt-3">از ربات تا Digital Twin عملیاتی</h2>
+    </div>
+    <div class="grid md:grid-cols-3 gap-8">
+      <div class="text-center">
+        <div class="w-14 h-14 mx-auto rounded-full border-2 border-signal flex items-center justify-center text-signal font-extrabold text-xl mb-4">۱</div>
+        <h3 class="font-bold text-white mb-2">استقرار با Design Partner</h3>
+        <p class="text-sm text-gray-400">شروع با یک کارخانه واقعی؛ اثبات کاهش زمان و هزینه لجستیک داخلی</p>
+      </div>
+      <div class="text-center">
+        <div class="w-14 h-14 mx-auto rounded-full border-2 border-motion flex items-center justify-center text-motion font-extrabold text-xl mb-4">۲</div>
+        <h3 class="font-bold text-white mb-2">مقیاس‌گیری ناوگان</h3>
+        <p class="text-sm text-gray-400">افزایش تعداد ربات‌ها و صنایع؛ ارزش به‌سمت لایه نرم‌افزار و تصمیم حرکت می‌کند</p>
+      </div>
+      <div class="text-center">
+        <div class="w-14 h-14 mx-auto rounded-full border-2 border-action flex items-center justify-center text-action font-extrabold text-xl mb-4">۳</div>
+        <h3 class="font-bold text-white mb-2">پلتفرم جامع لجستیک</h3>
+        <p class="text-sm text-gray-400">سیستم مدیریت لجستیک داخلی با Digital Twin و یکپارچگی کامل با ERP/WMS/MES</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Market -->
+<section id="market" class="border-t border-white/10">
+  <div class="max-w-6xl mx-auto px-6 py-20">
+    <div class="grid md:grid-cols-2 gap-12 items-center">
+      <div>
+        <span class="text-xs font-bold text-signal">بازار</span>
+        <h2 class="text-3xl md:text-4xl font-extrabold text-white mt-3 mb-6 leading-snug">
+          بازاری بزرگ و افقی برای صنایع ایران
+        </h2>
+        <p class="text-gray-400 leading-relaxed mb-6">
+          هر صنعتی با جابه‌جایی داخلی سنگین، مشتری بالقوه است — از FMCG و خودروسازی تا فولاد، معدن، دارو،
+          لجستیک و تجارت الکترونیک. مدل کسب‌وکار enterprise (سخت‌افزار + SaaS) با ارزش قرارداد بالا و churn پایین.
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <span class="text-xs bg-white/5 border border-white/10 text-gray-300 rounded-full px-4 py-2">FMCG</span>
+          <span class="text-xs bg-white/5 border border-white/10 text-gray-300 rounded-full px-4 py-2">خودروسازی</span>
+          <span class="text-xs bg-white/5 border border-white/10 text-gray-300 rounded-full px-4 py-2">فولاد و معدن</span>
+          <span class="text-xs bg-white/5 border border-white/10 text-gray-300 rounded-full px-4 py-2">دارو</span>
+          <span class="text-xs bg-white/5 border border-white/10 text-gray-300 rounded-full px-4 py-2">لجستیک</span>
+          <span class="text-xs bg-white/5 border border-white/10 text-gray-300 rounded-full px-4 py-2">تجارت الکترونیک</span>
+        </div>
+      </div>
+      <div class="bg-panel border border-white/10 rounded-2xl p-8">
+        <p class="text-gray-300 leading-loose">
+          شرکتی که این را درست بسازد، فقط یک ربات حمل بار نمی‌سازد —
+          <span class="text-white font-bold"> زیرساخت هوشمند Industrial Mobility و لجستیک داخلی برای صنایع بزرگ ایران </span>
+          را می‌سازد.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA / Contact -->
+<section id="contact" class="border-t border-white/10 bg-panel/40">
+  <div class="max-w-3xl mx-auto px-6 py-20 text-center">
+    <h2 class="text-3xl md:text-4xl font-extrabold text-white mb-4">
+      آماده‌اید کارخانه شما را هوشمندتر کنیم؟
+    </h2>
+    <p class="text-gray-400 mb-10">برای دمو، همکاری design partner یا دریافت پیچ‌دک کامل با ما در تماس باشید.</p>
+    <form class="flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
+      <input type="email" placeholder="ایمیل سازمانی شما" class="flex-1 bg-ink border border-white/15 rounded-lg px-4 py-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-signal">
+      <button type="submit" class="font-bold bg-action text-ink px-6 py-3 rounded-lg hover:brightness-110 transition whitespace-nowrap">ارسال</button>
+    </form>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="border-t border-white/10">
+  <div class="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500">
+    <div>موجَک | Motiva — هوش پشت هر حرکت</div>
+    <div>© ۱۴۰۴ — همه حقوق محفوظ است</div>
+  </div>
+</footer>
+
+</body>
+</html>

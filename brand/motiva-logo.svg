@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 160" width="560" height="160">
+  <defs>
+    <linearGradient id="motivaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22D3EE"/>
+      <stop offset="100%" stop-color="#6366F1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Icon mark: central node with dynamic routing paths (AMR path, not fixed line) -->
+  <g transform="translate(20,20)">
+    <rect x="0" y="0" width="120" height="120" rx="26" fill="#0B1220"/>
+
+    <!-- three dynamic route paths converging to center node -->
+    <path d="M22 92 C 40 92, 46 70, 60 60" fill="none" stroke="url(#motivaGrad)" stroke-width="7" stroke-linecap="round"/>
+    <path d="M98 92 C 80 92, 74 70, 60 60" fill="none" stroke="url(#motivaGrad)" stroke-width="7" stroke-linecap="round" opacity="0.85"/>
+    <path d="M60 22 C 60 38, 60 46, 60 60" fill="none" stroke="url(#motivaGrad)" stroke-width="7" stroke-linecap="round" opacity="0.7"/>
+
+    <!-- endpoints (nodes / robots) -->
+    <circle cx="22" cy="92" r="6" fill="#22D3EE"/>
+    <circle cx="98" cy="92" r="6" fill="#6366F1"/>
+    <circle cx="60" cy="22" r="6" fill="#22D3EE"/>
+
+    <!-- central intelligence node -->
+    <circle cx="60" cy="60" r="12" fill="url(#motivaGrad)"/>
+    <circle cx="60" cy="60" r="12" fill="none" stroke="#0B1220" stroke-width="2"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="165" y="78" font-family="Inter, Poppins, Arial, sans-serif" font-size="42" font-weight="800" fill="#0B1220">
+    Motiva
+  </text>
+  <text x="165" y="105" font-family="Vazirmatn, Tahoma, Arial, sans-serif" font-size="20" font-weight="500" fill="#6366F1">
+    موجَک
+  </text>
+</svg>
