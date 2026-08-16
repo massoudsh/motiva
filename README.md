@@ -60,6 +60,7 @@ brand/     هویت بصری — لوگو، پالت رنگ، تایپوگراف
 landing/   صفحه فرود محصول (index.html)
 pitch/     سورس HTML پیچ‌دک قابل ویرایش
 outputs/   خروجی نهایی پیچ‌دک (PDF و PPTX)
+docs/wiki/ ویکی دانش زنده پروژه (overview، roadmap، entityها)
 ```
 
 ## مستندات
@@ -68,6 +69,10 @@ outputs/   خروجی نهایی پیچ‌دک (PDF و PPTX)
 - [پیچ‌دک (PDF)](./outputs/motiva-pitch-deck.pdf)
 - [پیچ‌دک (PPTX — قابل ویرایش)](./outputs/motiva-pitch-deck.pptx)
 - [سورس پیچ‌دک (HTML)](./pitch/motiva-pitch-deck.html)
+
+## ویکی دانش پروژه
+
+مستندات فنی زنده (overview، نقشه‌راه، entityها) در [`docs/wiki/`](./docs/wiki/) نگهداری می‌شود و با رشد پروژه به‌روزرسانی می‌گردد؛ نسخه قابل‌مرور همان محتوا روی [GitHub Wiki](../../wiki) هم منتشر شده. قوانین نگهداری در [`AGENTS.md`](./AGENTS.md).
 
 ---
 
