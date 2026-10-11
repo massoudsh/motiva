@@ -4,45 +4,63 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 HOST = "127.0.0.1"
 PORT = 8787
+DB_PATH = Path(os.environ.get("MOTIVA_DB_PATH", Path(__file__).with_name("motiva.sqlite3")))
+SEED_MISSIONS = (
+    (2048, "انبار مواد اولیه", "خط تولید A", "R-07", "done", "10:24"),
+    (2047, "خط تولید B", "بسته‌بندی", "R-12", "running", "10:29"),
+    (2046, "بارگیری", "انبار محصول", "R-03", "waiting", "10:31"),
+)
 
-MISSIONS: list[dict[str, Any]] = [
-    {
-        "id": "M-2048",
-        "origin": "انبار مواد اولیه",
-        "destination": "خط تولید A",
-        "robot": "R-07",
-        "status": "done",
-        "started_at": "10:24",
-    },
-    {
-        "id": "M-2047",
-        "origin": "خط تولید B",
-        "destination": "بسته‌بندی",
-        "robot": "R-12",
-        "status": "running",
-        "started_at": "10:29",
-    },
-    {
-        "id": "M-2046",
-        "origin": "بارگیری",
-        "destination": "انبار محصول",
-        "robot": "R-03",
-        "status": "waiting",
-        "started_at": "10:31",
-    },
-]
+
+def connection() -> sqlite3.Connection:
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+    return db
+
+
+def initialize_db() -> None:
+    with connection() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS missions (
+                id INTEGER PRIMARY KEY,
+                origin TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                robot TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('done', 'running', 'waiting')),
+                started_at TEXT NOT NULL
+            )
+            """
+        )
+        if not db.execute("SELECT 1 FROM missions LIMIT 1").fetchone():
+            db.executemany("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", SEED_MISSIONS)
+
+
+def mission_payload(row: sqlite3.Row) -> dict[str, str]:
+    return {
+        "id": f"M-{row['id']}",
+        "origin": row["origin"],
+        "destination": row["destination"],
+        "robot": row["robot"],
+        "status": row["status"],
+        "started_at": row["started_at"],
+    }
 
 
 def response_payload() -> dict[str, Any]:
+    with connection() as db:
+        rows = db.execute("SELECT * FROM missions ORDER BY id DESC LIMIT 10").fetchall()
     return {
         "fleet": {"online": 18, "total": 20, "utilization": 93, "average_battery": 78},
-        "missions": {"active": 42, "cycle_minutes": 4.8, "items": MISSIONS},
+        "missions": {"active": 42, "cycle_minutes": 4.8, "items": [mission_payload(row) for row in rows]},
         "system": {"core": 96, "wms": 100, "status": "healthy"},
     }
 
@@ -96,21 +114,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send(422, {"error": "origin_and_destination_are_required"})
             return
 
-        mission = {
-            "id": f"M-{2049 + len(MISSIONS)}",
-            "origin": payload["origin"].strip(),
-            "destination": payload["destination"].strip(),
-            "robot": "تخصیص خودکار",
-            "status": "waiting",
-            "started_at": "اکنون",
-        }
-        MISSIONS.insert(0, mission)
-        self._send(201, {"mission": mission})
+        with connection() as db:
+            next_id = db.execute("SELECT COALESCE(MAX(id), 2048) + 1 FROM missions").fetchone()[0]
+            db.execute(
+                "INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)",
+                (next_id, payload["origin"].strip(), payload["destination"].strip(), "تخصیص خودکار", "waiting", "اکنون"),
+            )
+            row = db.execute("SELECT * FROM missions WHERE id = ?", (next_id,)).fetchone()
+        self._send(201, {"mission": mission_payload(row)})
 
     def log_message(self, format: str, *args: object) -> None:
         return
 
 
 if __name__ == "__main__":
+    initialize_db()
     print(f"Motiva API listening on http://{HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
