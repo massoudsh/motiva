@@ -69,7 +69,8 @@
 <script>
   const toast=document.getElementById('toast');
   function notify(message){toast.textContent=message;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),2200)}
-  document.getElementById('refresh').addEventListener('click',()=>notify('داده‌ها به‌روزرسانی شدند'));
+  async function refreshOverview(){try{const response=await fetch('/api/overview');if(!response.ok)throw new Error('request failed');await response.json();notify('داده‌ها به‌روزرسانی شدند')}catch(error){notify('حالت نمایشی فعال است')}}
+  document.getElementById('refresh').addEventListener('click',refreshOverview);
   document.getElementById('newMission').addEventListener('click',()=>notify('فرم مأموریت جدید در نسخه بعدی فعال می‌شود'));
   document.querySelectorAll('.nav button').forEach(button=>button.addEventListener('click',()=>{document.querySelector('.nav .active').classList.remove('active');button.classList.add('active');notify(`بخش «${button.dataset.section}» انتخاب شد`)}));
 </script>
