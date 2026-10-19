@@ -40,6 +40,7 @@ def connection() -> sqlite3.Connection:
 
 def initialize_db() -> None:
     with connection() as db:
+        db.execute("BEGIN IMMEDIATE")
         schema = db.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'missions'").fetchone()
         migrate = schema is not None and "'cancelled'" not in schema["sql"]
         if migrate:
@@ -81,9 +82,9 @@ def response_payload() -> dict[str, Any]:
     with connection() as db:
         missions = db.execute("SELECT * FROM missions ORDER BY id DESC LIMIT 10").fetchall()
         robots = db.execute("SELECT * FROM robots ORDER BY id").fetchall()
+        active = db.execute("SELECT COUNT(*) FROM missions WHERE status IN ('running', 'waiting')").fetchone()[0]
     online = sum(row["status"] != "offline" for row in robots)
     average_battery = round(sum(row["battery"] for row in robots) / len(robots)) if robots else 0
-    active = sum(row["status"] in {"running", "waiting"} for row in missions)
     return {
         "fleet": {"online": online, "total": len(robots), "utilization": 93, "average_battery": average_battery},
         "robots": [robot_payload(row) for row in robots],
@@ -105,8 +106,10 @@ class Handler(BaseHTTPRequestHandler):
     def _read_json(self) -> Any:
         try:
             size = int(self.headers.get("Content-Length", "0"))
+            if not 0 < size <= 65536:
+                return None
             return json.loads(self.rfile.read(size))
-        except (ValueError, json.JSONDecodeError):
+        except (ValueError, UnicodeDecodeError):
             return None
 
     def do_OPTIONS(self) -> None:
@@ -138,19 +141,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = self.path.split("?", 1)[0]
         payload = self._read_json()
+        if payload is None:
+            self._send(400, {"error": "invalid_json"})
+            return
         if path == "/api/missions":
             self.create_mission(payload)
             return
         if path == "/api/telemetry":
-            if payload is None:
-                self._send(400, {"error": "invalid_json"})
-                return
             self.update_telemetry(payload)
             return
         match = MISSION_PATH.match(path)
-        if match and payload is None:
-            self._send(400, {"error": "invalid_json"})
-        elif match:
+        if match:
             command = match.group(2)
             self.assign_mission(int(match.group(1)), payload) if command == "assign" else self.cancel_mission(int(match.group(1)))
         else:
@@ -162,6 +163,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(422, {"error": "origin_and_destination_are_required"})
             return
         with connection() as db:
+            db.execute("BEGIN IMMEDIATE")
             next_id = db.execute("SELECT COALESCE(MAX(id), 2048) + 1 FROM missions").fetchone()[0]
             db.execute("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", (next_id, payload["origin"].strip(), payload["destination"].strip(), UNASSIGNED_ROBOT, "waiting", "اکنون"))
             row = db.execute("SELECT * FROM missions WHERE id = ?", (next_id,)).fetchone()
@@ -173,6 +175,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(422, {"error": "robot_id_is_required"})
             return
         with connection() as db:
+            db.execute("BEGIN IMMEDIATE")
             mission = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
             robot = db.execute("SELECT * FROM robots WHERE id = ?", (robot_id.strip(),)).fetchone()
             if mission is None:
@@ -193,6 +196,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def cancel_mission(self, mission_id: int) -> None:
         with connection() as db:
+            db.execute("BEGIN IMMEDIATE")
             mission = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
             if mission is None:
                 self._send(404, {"error": "mission_not_found"})
@@ -211,7 +215,10 @@ class Handler(BaseHTTPRequestHandler):
         status = payload.get("status")
         battery = payload.get("battery")
         position = payload.get("position")
-        if status not in ROBOT_STATUSES or not isinstance(battery, int) or not 0 <= battery <= 100 or not isinstance(position, dict) or not all(isinstance(position.get(axis), int) for axis in ("x", "y")):
+        if (not isinstance(status, str) or status not in ROBOT_STATUSES
+                or type(battery) is not int or not 0 <= battery <= 100
+                or not isinstance(position, dict)
+                or not all(type(position.get(axis)) is int and 0 <= position[axis] <= 100 for axis in ("x", "y"))):
             self._send(422, {"error": "invalid_telemetry"})
             return
         with connection() as db:
