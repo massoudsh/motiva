@@ -7,6 +7,7 @@
 **پلتفرم هوشمند مدیریت ناوگان ربات‌های خودران (AMR) و اتوماسیون لجستیک داخلی کارخانه و انبار**
 
 [![Landing Page](https://img.shields.io/badge/Landing-Page-22D3EE?style=flat-square)](./landing/index.html)
+[![Operations App](https://img.shields.io/badge/Operations-App-34D399?style=flat-square)](./app/index.html)
 [![Pitch Deck](https://img.shields.io/badge/Pitch-Deck-6366F1?style=flat-square)](./outputs/motiva-pitch-deck.pdf)
 [![Brand Identity](https://img.shields.io/badge/Brand-Identity-F59E0B?style=flat-square)](./brand/motiva-brand-identity.md)
 
@@ -58,6 +59,7 @@ FMCG و خودروسازی · فولاد و معدن · دارو و لجستیک
 ```
 brand/     هویت بصری — لوگو، پالت رنگ، تایپوگرافی، لحن برند
 landing/   صفحه فرود محصول (index.html)
+app/       داشبورد عملیات و API محلی fleet (prototype)
 pitch/     سورس HTML پیچ‌دک قابل ویرایش
 outputs/   خروجی نهایی پیچ‌دک (PDF و PPTX)
 docs/wiki/ ویکی دانش زنده پروژه (overview، roadmap، entityها)

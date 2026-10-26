@@ -17,7 +17,6 @@ DB_PATH = Path(os.environ.get("MOTIVA_DB_PATH", Path(__file__).with_name("motiva
 UNASSIGNED_ROBOT = "تخصیص خودکار"
 MISSION_COLUMNS = "id, origin, destination, robot, status, started_at"
 ROBOT_STATUSES = {"moving", "waiting", "charging", "offline"}
-MISSION_STATUSES = {"done", "running", "waiting", "cancelled"}
 SEED_MISSIONS = (
     (2048, "انبار مواد اولیه", "خط تولید A", "R-07", "done", "10:24"),
     (2047, "خط تولید B", "بسته‌بندی", "R-12", "running", "10:29"),
@@ -86,10 +85,10 @@ def response_payload() -> dict[str, Any]:
     online = sum(row["status"] != "offline" for row in robots)
     average_battery = round(sum(row["battery"] for row in robots) / len(robots)) if robots else 0
     return {
-        "fleet": {"online": online, "total": len(robots), "utilization": 93, "average_battery": average_battery},
+        "fleet": {"online": online, "total": len(robots), "utilization": None, "average_battery": average_battery},
         "robots": [robot_payload(row) for row in robots],
-        "missions": {"active": active, "cycle_minutes": 4.8, "items": [mission_payload(row) for row in missions]},
-        "system": {"core": 96, "wms": 100, "status": "healthy"},
+        "missions": {"active": active, "cycle_minutes": None, "items": [mission_payload(row) for row in missions]},
+        "system": {"core": None, "wms": None, "status": "prototype"},
     }
 
 

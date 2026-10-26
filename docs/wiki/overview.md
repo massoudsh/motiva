@@ -3,9 +3,10 @@
 **موجَک | Motiva** — پلتفرم هوشمند مدیریت ناوگان ربات‌های خودران (AMR) و اتوماسیون لجستیک داخلی کارخانه/انبار. تگ‌لاین: «هوش پشت هر حرکت».
 
 ## وضعیت فعلی پروژه
-این ریپو در مرحله **پیش از کدنویسی محصول** است — هنوز backend/frontend واقعی نوشته نشده. محتوای فعلی صرفاً مواد marketing/brand/fundraising است:
+این ریپو هنوز کنترل واقعی ربات و اتصال production به WMS/ERP ندارد، اما prototype رابط عملیات و API محلی آن پیاده‌سازی شده است. محتوای فعلی:
 - `brand/` — هویت بصری (لوگو SVG، پالت رنگ، تایپوگرافی، لحن برند) → [[concepts/brand-identity]]
 - `landing/index.html` — لندینگ استاتیک (Tailwind CDN, یک فایل)
+- `app/index.html` و `app/server.py` — داشبورد RTL عملیات و API محلی با persistence SQLite → [[entities/operations-dashboard]]
 - `pitch/motiva-pitch-deck.html` — سورس پیچ‌دک قابل ویرایش (۹ اسلاید HTML/CSS)
 - `outputs/` — خروجی نهایی پیچ‌دک (PDF + PPTX)
 - `README.md` — لندینگ‌پیج ریپوی گیت‌هاب

@@ -1,10 +1,11 @@
 # Index
 
 ## Overview
-- [[overview]] — موجَک | Motiva؛ پروژه در مرحله پیش از کدنویسی، فعلاً فقط brand/landing/pitch/roadmap
+- [[overview]] — موجَک | Motiva؛ برند، لندینگ، prototype داشبورد عملیات، API محلی، پیچ‌دک و roadmap
 
-## Entities (2 صفحه)
+## Entities (3 صفحه)
 - [[entities/landing-page]] — صفحه فرود استاتیک (`landing/index.html`)
+- [[entities/operations-dashboard]] — prototype داشبورد RTL کنترل عملیات (`app/index.html`, `app/server.py`)
 - [[entities/pitch-deck]] — پیچ‌دک ۹ اسلایدی و خروجی PDF/PPTX (`pitch/`, `outputs/`)
 
 ## Concepts (2 صفحه)
