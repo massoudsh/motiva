@@ -65,6 +65,12 @@ outputs/   خروجی نهایی پیچ‌دک (PDF و PPTX)
 docs/wiki/ ویکی دانش زنده پروژه (overview، roadmap، entityها)
 ```
 
+## معماری و توسعه
+
+- [معماری فنی](./ARCHITECTURE.md)
+- [تنظیمات محلی نمونه](./.env.example)
+- تست‌ها: `python -m unittest discover -s app -p 'test_*.py'`
+
 ## مستندات
 
 - [هویت برند](./brand/motiva-brand-identity.md)
