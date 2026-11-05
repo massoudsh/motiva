@@ -11,6 +11,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from navigation import shortest_path
+
 HOST = "127.0.0.1"
 PORT = 8787
 DB_PATH = Path(os.environ.get("MOTIVA_DB_PATH", Path(__file__).with_name("motiva.sqlite3")))
@@ -55,6 +57,16 @@ def initialize_db() -> None:
             id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('moving', 'waiting', 'charging', 'offline')),
             battery INTEGER NOT NULL CHECK(battery BETWEEN 0 AND 100), x INTEGER NOT NULL,
             y INTEGER NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        db.execute("""CREATE TABLE IF NOT EXISTS map_nodes (
+            id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('zone', 'station')),
+            name TEXT NOT NULL)""")
+        db.execute("""CREATE TABLE IF NOT EXISTS map_edges (
+            source TEXT NOT NULL, target TEXT NOT NULL,
+            PRIMARY KEY(source, target),
+            FOREIGN KEY(source) REFERENCES map_nodes(id), FOREIGN KEY(target) REFERENCES map_nodes(id))""")
+        db.execute("""CREATE TABLE IF NOT EXISTS map_obstacles (
+            node_id TEXT PRIMARY KEY, active INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY(node_id) REFERENCES map_nodes(id))""")
         if not db.execute("SELECT 1 FROM missions LIMIT 1").fetchone():
             db.executemany("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", SEED_MISSIONS)
         if not db.execute("SELECT 1 FROM robots LIMIT 1").fetchone():
@@ -134,6 +146,8 @@ class Handler(BaseHTTPRequestHandler):
             with connection() as db:
                 rows = db.execute("SELECT * FROM robots ORDER BY id").fetchall()
             self._send(200, {"robots": [robot_payload(row) for row in rows]})
+        elif self.path == "/api/map":
+            self.get_map()
         else:
             self._send(404, {"error": "route_not_found"})
 
@@ -142,6 +156,18 @@ class Handler(BaseHTTPRequestHandler):
         payload = self._read_json()
         if payload is None:
             self._send(400, {"error": "invalid_json"})
+            return
+        if path == "/api/map/nodes":
+            self.add_map_node(payload)
+            return
+        if path == "/api/map/edges":
+            self.add_map_edge(payload)
+            return
+        if path == "/api/map/obstacles":
+            self.set_obstacle(payload)
+            return
+        if path == "/api/map/route":
+            self.calculate_route(payload)
             return
         if path == "/api/missions":
             self.create_mission(payload)
@@ -155,6 +181,59 @@ class Handler(BaseHTTPRequestHandler):
             self.assign_mission(int(match.group(1)), payload) if command == "assign" else self.cancel_mission(int(match.group(1)))
         else:
             self._send(404, {"error": "route_not_found"})
+
+    def get_map(self) -> None:
+        with connection() as db:
+            nodes = [dict(row) for row in db.execute("SELECT * FROM map_nodes ORDER BY id")]
+            edges = [dict(row) for row in db.execute("SELECT source, target FROM map_edges ORDER BY source, target")]
+            obstacles = [row[0] for row in db.execute("SELECT node_id FROM map_obstacles WHERE active = 1")]
+        self._send(200, {"nodes": nodes, "edges": edges, "obstacles": obstacles})
+
+    def add_map_node(self, payload: Any) -> None:
+        if not isinstance(payload, dict) or not isinstance(payload.get("id"), str) or not payload["id"].strip() or payload.get("kind") not in {"zone", "station"} or not isinstance(payload.get("name"), str) or not payload["name"].strip():
+            self._send(422, {"error": "invalid_map_node"})
+            return
+        with connection() as db:
+            db.execute("INSERT OR REPLACE INTO map_nodes(id, kind, name) VALUES (?, ?, ?)", (payload["id"].strip(), payload["kind"], payload["name"].strip()))
+        self._send(201, {"node": {"id": payload["id"].strip(), "kind": payload["kind"], "name": payload["name"].strip()}})
+
+    def add_map_edge(self, payload: Any) -> None:
+        if not isinstance(payload, dict) or not all(isinstance(payload.get(key), str) and payload[key].strip() for key in ("source", "target")) or payload["source"] == payload["target"]:
+            self._send(422, {"error": "invalid_map_edge"})
+            return
+        with connection() as db:
+            known = db.execute("SELECT COUNT(*) FROM map_nodes WHERE id IN (?, ?)", (payload["source"], payload["target"])).fetchone()[0]
+            if known != 2:
+                self._send(422, {"error": "map_node_not_found"})
+                return
+            db.execute("INSERT OR IGNORE INTO map_edges(source, target) VALUES (?, ?)", (payload["source"], payload["target"]))
+        self._send(201, {"edge": {"source": payload["source"], "target": payload["target"]}})
+
+    def set_obstacle(self, payload: Any) -> None:
+        node_id = payload.get("node_id") if isinstance(payload, dict) else None
+        active = payload.get("active", True) if isinstance(payload, dict) else True
+        if not isinstance(node_id, str) or not node_id.strip() or not isinstance(active, bool):
+            self._send(422, {"error": "invalid_obstacle"})
+            return
+        with connection() as db:
+            if db.execute("SELECT 1 FROM map_nodes WHERE id = ?", (node_id,)).fetchone() is None:
+                self._send(404, {"error": "map_node_not_found"})
+                return
+            db.execute("INSERT OR REPLACE INTO map_obstacles(node_id, active) VALUES (?, ?)", (node_id, int(active)))
+        self._send(200, {"node_id": node_id, "active": active})
+
+    def calculate_route(self, payload: Any) -> None:
+        if not isinstance(payload, dict) or not all(isinstance(payload.get(key), str) and payload[key].strip() for key in ("start", "goal")):
+            self._send(422, {"error": "route_endpoints_are_required"})
+            return
+        with connection() as db:
+            edges = db.execute("SELECT source, target FROM map_edges").fetchall()
+            blocked = [row[0] for row in db.execute("SELECT node_id FROM map_obstacles WHERE active = 1")]
+        path = shortest_path(((row["source"], row["target"]) for row in edges), payload["start"], payload["goal"], blocked)
+        if not path:
+            self._send(409, {"error": "route_not_found"})
+            return
+        self._send(200, {"path": path})
 
     def create_mission(self, payload: Any) -> None:
         required = ("origin", "destination")

@@ -102,6 +102,19 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(self.post('/api/missions/3000/cancel', {})[0], 200)
         server.initialize_db()
         self.assertEqual(server.response_payload()['missions']['items'][0]['status'], 'cancelled')
+    def test_map_route_respects_temporary_obstacles(self):
+        for node in (
+            {'id': 'A', 'kind': 'station', 'name': 'A'},
+            {'id': 'B', 'kind': 'zone', 'name': 'B'},
+            {'id': 'C', 'kind': 'station', 'name': 'C'},
+            {'id': 'D', 'kind': 'zone', 'name': 'D'},
+        ):
+            self.assertEqual(self.post('/api/map/nodes', node)[0], 201)
+        for edge in ({'source': 'A', 'target': 'B'}, {'source': 'B', 'target': 'C'}, {'source': 'A', 'target': 'D'}, {'source': 'D', 'target': 'C'}):
+            self.assertEqual(self.post('/api/map/edges', edge)[0], 201)
+        self.assertEqual(self.post('/api/map/route', {'start': 'A', 'goal': 'C'})[1]['path'], ['A', 'B', 'C'])
+        self.assertEqual(self.post('/api/map/obstacles', {'node_id': 'B', 'active': True})[0], 200)
+        self.assertEqual(self.post('/api/map/route', {'start': 'A', 'goal': 'C'})[1]['path'], ['A', 'D', 'C'])
 
 
 if __name__ == '__main__':
