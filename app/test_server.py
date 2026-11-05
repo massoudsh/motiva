@@ -38,6 +38,15 @@ class OperationsTests(unittest.TestCase):
         finally:
             client.close()
 
+    def get(self, path):
+        client = http.client.HTTPConnection(*self.http.server_address, timeout=5)
+        try:
+            client.request('GET', path)
+            response = client.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            client.close()
+
     def create(self, number=0):
         return self.post('/api/missions', {'origin': f'Origin {number}', 'destination': 'Destination'})
 
@@ -108,6 +117,15 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(data['mission']['priority'], 'urgent')
         self.assertEqual(data['mission']['source'], 'wms')
         self.assertEqual(data['mission']['cargo'], 'Pallet')
+
+    def test_alerts_reports_and_telemetry_history(self):
+        self.assertEqual(self.post('/api/telemetry', {'id': 'R-01', 'status': 'moving', 'battery': 15, 'position': {'x': 30, 'y': 40}})[0], 200)
+        status, alerts = self.get('/api/alerts')
+        self.assertEqual(status, 200)
+        self.assertEqual(alerts['alerts'][0]['type'], 'low_battery')
+        status, report = self.get('/api/reports')
+        self.assertEqual(status, 200)
+        self.assertEqual(report['telemetry_samples'], 1)
 
     def test_map_route_respects_temporary_obstacles(self):
         for node in (

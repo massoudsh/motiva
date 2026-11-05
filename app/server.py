@@ -53,6 +53,11 @@ def initialize_db() -> None:
         if migrate:
             db.execute(f"INSERT INTO missions ({MISSION_COLUMNS}) SELECT {MISSION_COLUMNS} FROM missions_legacy")
             db.execute("DROP TABLE missions_legacy")
+        db.execute("""CREATE TABLE IF NOT EXISTS telemetry_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, robot_id TEXT NOT NULL, status TEXT NOT NULL,
+            battery INTEGER NOT NULL, x INTEGER NOT NULL, y INTEGER NOT NULL,
+            recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(robot_id) REFERENCES robots(id))""")
         db.execute("""CREATE TABLE IF NOT EXISTS mission_details (
             mission_id INTEGER PRIMARY KEY, cargo TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'normal',
             deadline TEXT, source TEXT NOT NULL DEFAULT 'manual', progress INTEGER NOT NULL DEFAULT 0,
@@ -160,6 +165,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"robots": [robot_payload(row) for row in rows]})
         elif self.path == "/api/map":
             self.get_map()
+        elif self.path == "/api/alerts":
+            self.get_alerts()
+        elif self.path == "/api/reports":
+            self.get_report()
         else:
             self._send(404, {"error": "route_not_found"})
 
@@ -193,6 +202,22 @@ class Handler(BaseHTTPRequestHandler):
             self.assign_mission(int(match.group(1)), payload) if command == "assign" else self.cancel_mission(int(match.group(1)))
         else:
             self._send(404, {"error": "route_not_found"})
+
+    def get_alerts(self) -> None:
+        with connection() as db:
+            robots = db.execute("SELECT id, status, battery FROM robots WHERE status = 'offline' OR battery <= 20 ORDER BY id").fetchall()
+            missions = db.execute("SELECT id, origin, destination FROM missions WHERE status = 'waiting' ORDER BY id").fetchall()
+        alerts = [{"type": "robot_offline" if row["status"] == "offline" else "low_battery", "severity": "critical" if row["status"] == "offline" else "warning", "robot": row["id"], "battery": row["battery"]} for row in robots]
+        alerts.extend({"type": "mission_waiting", "severity": "info", "mission": f"M-{row['id']}", "origin": row["origin"], "destination": row["destination"]} for row in missions)
+        self._send(200, {"alerts": alerts})
+
+    def get_report(self) -> None:
+        with connection() as db:
+            totals = db.execute("SELECT COUNT(*) AS total, SUM(status = 'done') AS completed, SUM(status IN ('running', 'waiting')) AS active FROM missions").fetchone()
+            robots = db.execute("SELECT COUNT(*) AS total, SUM(status != 'offline') AS online FROM robots").fetchone()
+            telemetry = db.execute("SELECT COUNT(*) FROM telemetry_history").fetchone()[0]
+        total_robots = robots["total"] or 0
+        self._send(200, {"period": "all", "missions": {"total": totals["total"], "completed": totals["completed"] or 0, "active": totals["active"] or 0}, "fleet": {"total": total_robots, "online": robots["online"] or 0, "utilization": round((robots["online"] or 0) / total_robots * 100) if total_robots else 0}, "telemetry_samples": telemetry})
 
     def get_map(self) -> None:
         with connection() as db:
@@ -321,6 +346,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         with connection() as db:
             cursor = db.execute("UPDATE robots SET status = ?, battery = ?, x = ?, y = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (status, battery, position["x"], position["y"], payload["id"]))
+            if cursor.rowcount:
+                db.execute("INSERT INTO telemetry_history(robot_id, status, battery, x, y) VALUES (?, ?, ?, ?, ?)", (payload["id"], status, battery, position["x"], position["y"]))
             row = db.execute("SELECT * FROM robots WHERE id = ?", (payload["id"],)).fetchone()
         if cursor.rowcount == 0:
             self._send(404, {"error": "robot_not_found"})
