@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from navigation import shortest_path
+from integration import decode_event, valid_signature
 
 HOST = "127.0.0.1"
 PORT = 8787
@@ -53,6 +54,9 @@ def initialize_db() -> None:
         if migrate:
             db.execute(f"INSERT INTO missions ({MISSION_COLUMNS}) SELECT {MISSION_COLUMNS} FROM missions_legacy")
             db.execute("DROP TABLE missions_legacy")
+        db.execute("""CREATE TABLE IF NOT EXISTS integration_events (
+            event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL, received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)
+        """)
         db.execute("""CREATE TABLE IF NOT EXISTS telemetry_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT, robot_id TEXT NOT NULL, status TEXT NOT NULL,
             battery INTEGER NOT NULL, x INTEGER NOT NULL, y INTEGER NOT NULL,
@@ -136,7 +140,8 @@ class Handler(BaseHTTPRequestHandler):
             size = int(self.headers.get("Content-Length", "0"))
             if not 0 < size <= 65536:
                 return None
-            return json.loads(self.rfile.read(size))
+            self.raw_body = self.rfile.read(size)
+            return json.loads(self.raw_body)
         except (ValueError, UnicodeDecodeError):
             return None
 
@@ -178,6 +183,9 @@ class Handler(BaseHTTPRequestHandler):
         if payload is None:
             self._send(400, {"error": "invalid_json"})
             return
+        if path == "/api/integrations/events":
+            self.receive_integration_event(payload)
+            return
         if path == "/api/map/nodes":
             self.add_map_node(payload)
             return
@@ -202,6 +210,27 @@ class Handler(BaseHTTPRequestHandler):
             self.assign_mission(int(match.group(1)), payload) if command == "assign" else self.cancel_mission(int(match.group(1)))
         else:
             self._send(404, {"error": "route_not_found"})
+
+    def receive_integration_event(self, payload: Any) -> None:
+        secret = os.environ.get("MOTIVA_WEBHOOK_SECRET")
+        if not secret:
+            self._send(503, {"error": "webhook_not_configured"})
+            return
+        if not valid_signature(self.raw_body, self.headers.get("X-Motiva-Signature"), secret) or decode_event(self.raw_body) is None:
+            self._send(401, {"error": "invalid_webhook"})
+            return
+        event = decode_event(self.raw_body)
+        with connection() as db:
+            inserted = db.execute("INSERT OR IGNORE INTO integration_events(event_id, event_type) VALUES (?, ?)", (event["id"], event["type"])).rowcount
+            if inserted and event["type"] == "transport_request.created":
+                data = event["data"]
+                if not isinstance(data.get("origin"), str) or not isinstance(data.get("destination"), str) or not data["origin"].strip() or not data["destination"].strip():
+                    self._send(422, {"error": "transport_request_is_incomplete"})
+                    return
+                next_id = db.execute("SELECT COALESCE(MAX(id), 2048) + 1 FROM missions").fetchone()[0]
+                db.execute("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", (next_id, data["origin"].strip(), data["destination"].strip(), UNASSIGNED_ROBOT, "waiting", "اکنون"))
+                db.execute("INSERT INTO mission_details(mission_id, source) VALUES (?, 'wms')", (next_id,))
+        self._send(200, {"accepted": True, "duplicate": not bool(inserted)})
 
     def get_alerts(self) -> None:
         with connection() as db:
