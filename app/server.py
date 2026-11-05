@@ -53,6 +53,10 @@ def initialize_db() -> None:
         if migrate:
             db.execute(f"INSERT INTO missions ({MISSION_COLUMNS}) SELECT {MISSION_COLUMNS} FROM missions_legacy")
             db.execute("DROP TABLE missions_legacy")
+        db.execute("""CREATE TABLE IF NOT EXISTS mission_details (
+            mission_id INTEGER PRIMARY KEY, cargo TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'normal',
+            deadline TEXT, source TEXT NOT NULL DEFAULT 'manual', progress INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(mission_id) REFERENCES missions(id))""")
         db.execute("""CREATE TABLE IF NOT EXISTS robots (
             id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('moving', 'waiting', 'charging', 'offline')),
             battery INTEGER NOT NULL CHECK(battery BETWEEN 0 AND 100), x INTEGER NOT NULL,
@@ -69,11 +73,14 @@ def initialize_db() -> None:
             FOREIGN KEY(node_id) REFERENCES map_nodes(id))""")
         if not db.execute("SELECT 1 FROM missions LIMIT 1").fetchone():
             db.executemany("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", SEED_MISSIONS)
+        db.execute("INSERT OR IGNORE INTO mission_details(mission_id) SELECT id FROM missions")
         if not db.execute("SELECT 1 FROM robots LIMIT 1").fetchone():
             db.executemany("INSERT INTO robots(id, status, battery, x, y) VALUES (?, ?, ?, ?, ?)", SEED_ROBOTS)
 
 
 def mission_payload(row: sqlite3.Row) -> dict[str, Any]:
+    with connection() as db:
+        detail = db.execute("SELECT cargo, priority, deadline, source, progress FROM mission_details WHERE mission_id = ?", (row["id"],)).fetchone()
     return {
         "id": f"M-{row['id']}",
         "origin": row["origin"],
@@ -82,6 +89,11 @@ def mission_payload(row: sqlite3.Row) -> dict[str, Any]:
         "status": row["status"],
         "started_at": row["started_at"],
         "assigned": row["robot"] != UNASSIGNED_ROBOT,
+        "cargo": detail["cargo"] if detail else "",
+        "priority": detail["priority"] if detail else "normal",
+        "deadline": detail["deadline"] if detail else None,
+        "source": detail["source"] if detail else "manual",
+        "progress": detail["progress"] if detail else 0,
     }
 
 
@@ -240,10 +252,18 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict) or any(not isinstance(payload.get(field), str) or not payload[field].strip() for field in required):
             self._send(422, {"error": "origin_and_destination_are_required"})
             return
+        priority = payload.get("priority", "normal")
+        cargo = payload.get("cargo", "")
+        deadline = payload.get("deadline")
+        source = payload.get("source", "manual")
+        if priority not in {"urgent", "high", "normal", "low"} or not isinstance(cargo, str) or not isinstance(source, str) or source not in {"manual", "wms"} or (deadline is not None and not isinstance(deadline, str)):
+            self._send(422, {"error": "invalid_mission_details"})
+            return
         with connection() as db:
             db.execute("BEGIN IMMEDIATE")
             next_id = db.execute("SELECT COALESCE(MAX(id), 2048) + 1 FROM missions").fetchone()[0]
             db.execute("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", (next_id, payload["origin"].strip(), payload["destination"].strip(), UNASSIGNED_ROBOT, "waiting", "اکنون"))
+            db.execute("INSERT INTO mission_details(mission_id, cargo, priority, deadline, source) VALUES (?, ?, ?, ?, ?)", (next_id, cargo.strip(), priority, deadline, source))
             row = db.execute("SELECT * FROM missions WHERE id = ?", (next_id,)).fetchone()
         self._send(201, {"mission": mission_payload(row)})
 

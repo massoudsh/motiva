@@ -102,6 +102,13 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(self.post('/api/missions/3000/cancel', {})[0], 200)
         server.initialize_db()
         self.assertEqual(server.response_payload()['missions']['items'][0]['status'], 'cancelled')
+    def test_mission_details_are_persisted(self):
+        status, data = self.post('/api/missions', {'origin': 'A', 'destination': 'B', 'cargo': 'Pallet', 'priority': 'urgent', 'deadline': '18:00', 'source': 'wms'})
+        self.assertEqual(status, 201)
+        self.assertEqual(data['mission']['priority'], 'urgent')
+        self.assertEqual(data['mission']['source'], 'wms')
+        self.assertEqual(data['mission']['cargo'], 'Pallet')
+
     def test_map_route_respects_temporary_obstacles(self):
         for node in (
             {'id': 'A', 'kind': 'station', 'name': 'A'},
