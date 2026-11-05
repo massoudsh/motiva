@@ -23,6 +23,7 @@
     <header class="topbar" id="overview"><div><p class="muted">مرکز عملیات / محیط نمونه</p><h1>نمای کلی ناوگان</h1></div><button class="button" id="refresh">به‌روزرسانی</button></header>
     <div class="notice" role="status" id="connectionStatus">در حال دریافت داده‌ها…</div>
     <p class="muted" id="lastUpdated">هنوز همگام‌سازی نشده است.</p>
+    <section class="card" id="alerts" aria-labelledby="alertsTitle" hidden><div class="card-head"><h2 id="alertsTitle">هشدارهای عملیاتی</h2><span class="muted" id="alertCount"></span></div><div class="content" id="alertList"></div></section>
     <section class="kpis" aria-label="شاخص‌های ثبت‌شده">
       <div class="card kpi"><div class="muted">آنلاین طبق آخرین گزارش</div><div class="value" id="onlineRobots">—</div><div class="muted">از کل ربات‌های ثبت‌شده</div></div>
       <div class="card kpi"><div class="muted">مأموریت‌های فعال</div><div class="value" id="activeMissions">—</div><div class="muted">تمام مأموریت‌های در صف و در حال اجرا</div></div>
@@ -90,6 +91,15 @@
       $('robotLayer').append(marker);
     });
   }
+  function renderAlerts(alerts) {
+    $('alerts').hidden = alerts.length === 0;
+    $('alertCount').textContent = alerts.length ? `${number.format(alerts.length)} مورد` : '';
+    $('alertList').innerHTML = alerts.map(alert => {
+      const subject = alert.robot || alert.mission || '—';
+      const label = {low_battery:'باتری کم',robot_offline:'ربات آفلاین',mission_waiting:'مأموریت در صف'}[alert.type] || 'هشدار عملیاتی';
+      return `<p class="${alert.severity === 'critical' ? 'error' : 'muted'}"><bdi>${escapeHtml(subject)}</bdi> — ${label}</p>`;
+    }).join('');
+  }
   function syncControls() {
     $('newMission').disabled = !connected || submitting;
     $('submitMission').disabled = !connected || submitting || (action === 'assign' && !$('robotChoice').value);
@@ -109,7 +119,7 @@
     $('refresh').disabled = true;
     refreshing = (async () => {
       try {
-        const data = await request('/api/overview');
+        const [data, alertData] = await Promise.all([request('/api/overview'), request('/api/alerts')]);
         latestRobots = data.robots; latestMissions = data.missions.items; connected = true;
         $('onlineRobots').textContent = `${number.format(data.fleet.online)} / ${number.format(data.fleet.total)}`;
         $('activeMissions').textContent = number.format(data.missions.active);
@@ -118,6 +128,7 @@
         $('connectionStatus').textContent = 'API محلی متصل است؛ داده‌ها شامل رکوردهای نمونه هستند و اتصال ربات واقعی تأیید نشده است.';
         $('lastUpdated').textContent = `آخرین دریافت: ${lastSuccess.toLocaleString('fa-IR', {timeZone:'Asia/Tehran'})} (تهران) · به‌روزرسانی هر ۱۵ ثانیه`;
         renderRobots();
+        renderAlerts(alertData.alerts);
         if (showNotice) notify('داده‌ها دریافت شدند.');
         return true;
       } catch (error) {
