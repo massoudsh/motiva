@@ -1,7 +1,7 @@
 # Index
 
 ## Overview
-- [[overview]] — موجَک | Motiva؛ برند، لندینگ، prototype داشبورد عملیات، API محلی، پیچ‌دک و roadmap
+- [[overview]] — موجَک | Motiva؛ برند، لندینگ، داشبورد عملیات، API محلی، مسیر‌یابی، integration و Docker
 
 ## Entities (3 صفحه)
 - [[entities/landing-page]] — صفحه فرود استاتیک (`landing/index.html`)

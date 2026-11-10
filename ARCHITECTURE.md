@@ -27,7 +27,7 @@ Commands are accepted only after authorization, state validation, and audit reco
 
 ## Local development
 
-The current prototype uses Python's standard library and SQLite so tests run without external services. The production target is Python services, PostgreSQL/TimescaleDB, EMQX, Keycloak, and Docker Compose. Production validation requires testing those services together before pilot deployment.
+The current prototype uses Python's standard library and SQLite so tests run without external services. It can run in the non-root `Dockerfile` image with `/data` mounted for persistence. The production target is Python services, PostgreSQL/TimescaleDB, EMQX, Keycloak, and Docker Compose. Production validation requires testing those services together before pilot deployment.
 
 ## Quality gates
 

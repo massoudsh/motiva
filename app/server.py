@@ -14,8 +14,8 @@ from typing import Any
 from navigation import shortest_path
 from integration import decode_event, valid_signature
 
-HOST = "127.0.0.1"
-PORT = 8787
+HOST = os.environ.get("MOTIVA_HOST", "127.0.0.1")
+PORT = int(os.environ.get("MOTIVA_PORT", "8787"))
 DB_PATH = Path(os.environ.get("MOTIVA_DB_PATH", Path(__file__).with_name("motiva.sqlite3")))
 UNASSIGNED_ROBOT = "تخصیص خودکار"
 MISSION_COLUMNS = "id, origin, destination, robot, status, started_at"

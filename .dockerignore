@@ -1,0 +1,15 @@
+.git
+.github
+.noqte
+docs
+brand
+landing
+outputs
+pitch
+uploads
+app/test_*.py
+app/__pycache__
+*.sqlite3
+*.log
+.env*
+Dockerfile

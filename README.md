@@ -65,11 +65,23 @@ outputs/   خروجی نهایی پیچ‌دک (PDF و PPTX)
 docs/wiki/ ویکی دانش زنده پروژه (overview، roadmap، entityها)
 ```
 
+## Local API and Docker
+
+Run the prototype without installing dependencies:
+
+```bash
+docker build -t motiva:local .
+docker run --rm -p 8787:8787 -v motiva-data:/data motiva:local
+```
+
+The API and dashboard are available at `http://localhost:8787`; SQLite data is stored in the named `motiva-data` volume. The image runs as a non-root user and exposes `/api/health` for container health checks.
+
 ## معماری و توسعه
 
 - [معماری فنی](./ARCHITECTURE.md)
 - [تنظیمات محلی نمونه](./.env.example)
 - تست‌ها: `python -m unittest discover -s app -p 'test_*.py'`
+
 
 ## مستندات
 
