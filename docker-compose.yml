@@ -1,0 +1,83 @@
+name: motiva
+
+services:
+  app:
+    build:
+      context: .
+    image: motiva/app:local
+    restart: unless-stopped
+    environment:
+      MOTIVA_HOST: 0.0.0.0
+      MOTIVA_PORT: "8787"
+      MOTIVA_DB_PATH: /data/motiva.sqlite3
+      MOTIVA_WEBHOOK_SECRET: ${MOTIVA_WEBHOOK_SECRET:-}
+    ports:
+      - "${MOTIVA_API_PORT:-8787}:8787"
+    volumes:
+      - motiva-data:/data
+
+  landing:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${MOTIVA_LANDING_PORT:-8080}:80"
+    volumes:
+      - ./landing:/usr/share/nginx/html:ro
+
+  # Target MVP stack from ADR-001. The prototype does not read from these yet;
+  # start them with: docker compose --profile platform up -d
+  timescaledb:
+    profiles: [platform]
+    image: timescale/timescaledb:2.17.2-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: motiva
+      POSTGRES_USER: motiva
+      POSTGRES_PASSWORD: ${MOTIVA_DB_PASSWORD:-motiva-local-only}
+    ports:
+      - "${MOTIVA_DB_PORT:-5432}:5432"
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U motiva -d motiva"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  emqx:
+    profiles: [platform]
+    image: emqx/emqx:5.8.3
+    restart: unless-stopped
+    environment:
+      EMQX_DASHBOARD__DEFAULT_USERNAME: motiva
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${MOTIVA_MQTT_DASHBOARD_PASSWORD:-motiva-local-only}
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "${MOTIVA_MQTT_DASHBOARD_PORT:-18083}:18083"
+    volumes:
+      - emqx-data:/opt/emqx/data
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  keycloak:
+    profiles: [platform]
+    image: quay.io/keycloak/keycloak:26.0.7
+    restart: unless-stopped
+    command: ["start-dev"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${MOTIVA_KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${MOTIVA_KEYCLOAK_PASSWORD:-motiva-local-only}
+    ports:
+      - "${MOTIVA_KEYCLOAK_PORT:-8081}:8080"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+
+volumes:
+  motiva-data:
+  timescale-data:
+  emqx-data:
+  keycloak-data:

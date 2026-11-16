@@ -26,6 +26,8 @@
 - در قطع API، عملیات غیرفعال و تازگی آخرین داده به کاربر اعلام می‌شود.
 - مسیر در گراف بدون جهت محاسبه می‌شود و گره‌های دارای مانع فعال کنار گذاشته می‌شوند.
 - webhook بدون secret پیکربندی‌شده یا signature معتبر پذیرفته نمی‌شود.
+- `MOTIVA_HOST` و `MOTIVA_PORT` قابل تنظیم‌اند (پیش‌فرض `127.0.0.1:8787`)؛ در کانتینر روی `0.0.0.0:8787` اجرا می‌شود و مسیر پوشهٔ دیتابیس را می‌سازد.
+- `docker compose up -d --build` سرویس `app` و صفحهٔ فرود nginx را بالا می‌آورد؛ TimescaleDB، EMQX و Keycloak فقط با پروفایل `platform` فعال می‌شوند و کد فعلی از آن‌ها استفاده نمی‌کند.
 
 ## منابع کد
 - `app/index.html` — رابط RTL، هشدارها، dialogهای native، فیلترها و وضعیت اتصال.
@@ -33,3 +35,4 @@
 - `app/navigation.py` — مسیر کوتاه و رزرو گره‌های متعارض.
 - `app/integration.py` — قرارداد event و HMAC.
 - `app/test_server.py` و `app/test_integration.py` — تست‌های API و قرارداد integration.
+- `Dockerfile`، `docker-compose.yml` و `.github/workflows/quality.yml` — بسته‌بندی کانتینر و بیلد/اسموک‌تست تصویر در CI.

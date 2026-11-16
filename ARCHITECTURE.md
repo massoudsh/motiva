@@ -29,6 +29,8 @@ Commands are accepted only after authorization, state validation, and audit reco
 
 The current prototype uses Python's standard library and SQLite so tests run without external services. It can run in the non-root `Dockerfile` image with `/data` mounted for persistence. The production target is Python services, PostgreSQL/TimescaleDB, EMQX, Keycloak, and Docker Compose. Production validation requires testing those services together before pilot deployment.
 
+`Dockerfile` packages the API and dashboard as a single non-root service listening on `0.0.0.0:8787`, with SQLite in the `/data` volume. `docker-compose.yml` runs that service and an nginx container for `landing/`; the TimescaleDB, EMQX, and Keycloak containers are isolated in the `platform` profile because the application does not consume them yet.
+
 ## Quality gates
 
-Run `python -m unittest discover -s app -p 'test_*.py'`. CI also runs syntax compilation and secret scanning; service integration tests should be added when the production dependencies are introduced.
+Run `python -m unittest discover -s app -p 'test_*.py'`. CI also runs syntax compilation, a Docker image build with a container health smoke test, and secret scanning; service integration tests should be added when the production dependencies are introduced.

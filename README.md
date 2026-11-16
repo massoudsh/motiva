@@ -65,16 +65,52 @@ outputs/   خروجی نهایی پیچ‌دک (PDF و PPTX)
 docs/wiki/ ویکی دانش زنده پروژه (overview، roadmap، entityها)
 ```
 
-## Local API and Docker
+## Docker
 
-Run the prototype without installing dependencies:
+The image runs the operations API and dashboard. The landing page is served by an nginx container, and the ADR-001 target stack (TimescaleDB, EMQX, Keycloak) is available as an optional Compose profile.
+
+```bash
+cp .env.example .env          # optional: set secrets and host ports
+docker compose up -d --build  # app (API + dashboard) and landing page
+docker compose ps             # health and published ports
+```
+
+| URL | Service |
+|---|---|
+| http://localhost:8787 | Operations dashboard and API |
+| http://localhost:8787/api/health | API health check |
+| http://localhost:8080 | Landing page (nginx) |
+
+Without Compose, the image can be run directly:
 
 ```bash
 docker build -t motiva:local .
 docker run --rm -p 8787:8787 -v motiva-data:/data motiva:local
 ```
 
-The API and dashboard are available at `http://localhost:8787`; SQLite data is stored in the named `motiva-data` volume. The image runs as a non-root user and exposes `/api/health` for container health checks.
+Optional target-stack services (not consumed by the prototype yet):
+
+```bash
+docker compose --profile platform up -d
+```
+
+| URL / port | Service |
+|---|---|
+| localhost:5432 | TimescaleDB (`motiva` / `motiva`) |
+| localhost:1883, localhost:8083 | EMQX MQTT and WebSocket |
+| http://localhost:18083 | EMQX dashboard |
+| http://localhost:8081 | Keycloak admin console |
+
+Operational commands:
+
+```bash
+docker compose logs -f app      # follow application logs
+docker compose stop app         # stop one service
+docker compose down             # stop and remove containers (volumes kept)
+docker compose down -v          # remove containers and data volumes
+```
+
+The SQLite database lives in the `motiva-data` volume at `/data/motiva.sqlite3`. The app listens on `0.0.0.0:8787` inside the container and runs as a non-root user. `POST /api/integrations/events` returns `503` until `MOTIVA_WEBHOOK_SECRET` is set.
 
 ## معماری و توسعه
 

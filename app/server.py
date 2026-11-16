@@ -41,6 +41,7 @@ def connection() -> sqlite3.Connection:
 
 
 def initialize_db() -> None:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with connection() as db:
         db.execute("BEGIN IMMEDIATE")
         schema = db.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'missions'").fetchone()
