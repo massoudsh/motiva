@@ -32,6 +32,24 @@ Commands are accepted only after authorization, state validation, and audit reco
 - **Inbound, wired:** `POST /api/integrations/vda5050` accepts `{"agv_id", "message_type": "state"|"connection", "payload"}` forwarded by whatever gateway subscribes to `state/{agv_id}` and `connection/{agv_id}`. State messages update battery, position, order context and safety flags; connection messages set the heartbeat directly. Coordinates are metres on the vehicle map, scaled to the site extent (`MOTIVA_MAP_EXTENT_METRES`) for the dashboard grid and clamped to 0-100.
 - **Outbound, not wired:** `order_message()` builds a valid VDA order from a route of map node ids, but nothing publishes to `order/{agv_id}`. No endpoint claims a command reached a robot. Publishing through an MQTT client is the remaining seam.
 
+## Auto-dispatch
+
+`app/dispatch.py` ranks robots for a mission and explains the result. A robot is
+excluded, with a reason, when it is `offline` (which includes stale heartbeats),
+`charging`, has an unknown battery, or is below the dispatch battery floor.
+Eligible robots are scored on a weighted blend of battery (0.40), workload
+(0.35) and distance to the origin (0.25); weights are renormalised when a signal
+is unavailable. Ties break on robot id so a recommendation is reproducible.
+
+Distance is only used when the mission origin resolves to a placed map node. The
+prototype's origins are free text, so an unresolved origin drops the distance
+signal instead of inventing a location — the response reports `distance_used`
+so the UI never implies a proximity it did not compute. `GET
+/api/missions/{id}/dispatch` returns a dry-run recommendation; `POST
+/api/missions/{id}/assign` with `{"auto": true}` performs the assignment inside
+the same serialised transaction, and returns the full explanation alongside the
+result.
+
 ## Heartbeat and offline state
 
 A robot is offline when its last heartbeat is older than `MOTIVA_HEARTBEAT_TIMEOUT_SECONDS`, or when it has never reported. The stored `status` keeps what the robot last reported; the API exposes the derived `status` plus `reported_status`, `stale` and `heartbeat_at`. A stale robot is never counted as online, never raises a low-battery alert in place of an offline alert, and cannot be assigned a mission.

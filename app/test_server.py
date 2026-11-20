@@ -253,5 +253,72 @@ class VdaBridgeTests(OperationsFixture):
         self.assertEqual(self.send(agv_id='R-07', message_type='state', payload=self.state())[0], 200)
 
 
+class DispatchEndpointTests(OperationsFixture):
+    def place(self, node_id, x, y):
+        return self.post('/api/map/nodes', {'id': node_id, 'kind': 'station', 'name': node_id, 'x': x, 'y': y})
+
+    def test_preview_explains_the_choice_without_assigning(self):
+        status, data = self.get('/api/missions/2046/dispatch')
+        self.assertEqual(status, 200)
+        self.assertIsNotNone(data['dispatch']['selected'])
+        self.assertTrue(data['dispatch']['candidates'])
+        self.assertEqual(data['mission']['status'], 'waiting')
+        for candidate in data['dispatch']['candidates']:
+            self.assertEqual(set(candidate), {'id', 'eligible', 'score', 'reason', 'components'})
+
+    def test_auto_assign_picks_the_best_robot_and_reports_why(self):
+        status, data = self.post('/api/missions/2046/assign', {'auto': True})
+        self.assertEqual(status, 200)
+        self.assertEqual(data['mission']['status'], 'running')
+        self.assertEqual(data['mission']['robot'], data['dispatch']['selected'])
+        self.assertEqual(data['dispatch']['candidates'][0]['id'], data['dispatch']['selected'])
+
+    def test_auto_assign_without_eligible_robots_is_a_conflict(self):
+        self.heartbeat_all(age=server.HEARTBEAT_TIMEOUT_SECONDS + 5)
+        status, data = self.post('/api/missions/2046/assign', {'auto': True})
+        self.assertEqual(status, 409)
+        self.assertEqual(data['error'], 'no_eligible_robot')
+        self.assertIsNone(data['dispatch']['selected'])
+
+    def test_distance_is_used_only_when_origin_names_a_placed_node(self):
+        self.place('A', 10, 10)
+        status, data = self.get('/api/missions/2046/dispatch')
+        self.assertEqual(status, 200)
+        # Seed mission origin is free text, so no distance signal is available.
+        self.assertFalse(data['dispatch']['distance_used'])
+        self.assertIsNone(data['dispatch']['origin_position'])
+
+        created = self.post('/api/missions', {'origin': 'A', 'destination': 'B'})[1]
+        status, data = self.get(f"/api/missions/{created['mission']['id'][2:]}/dispatch")
+        self.assertTrue(data['dispatch']['distance_used'])
+        self.assertEqual(data['dispatch']['origin_position'], {'x': 10, 'y': 10})
+
+    def test_manual_assign_still_works_and_has_no_dispatch_key(self):
+        status, data = self.post('/api/missions/2046/assign', {'robot': 'R-04'})
+        self.assertEqual(status, 200)
+        self.assertNotIn('dispatch', data)
+
+    def test_assign_with_neither_robot_nor_auto_is_rejected(self):
+        self.assertEqual(self.post('/api/missions/2046/assign', {})[0], 422)
+        self.assertEqual(self.post('/api/missions/2046/assign', {'auto': 'yes'})[0], 422)
+
+    def test_dispatch_preview_rejects_non_waiting_mission(self):
+        self.assertEqual(self.get('/api/missions/2047/dispatch')[0], 409)
+        self.assertEqual(self.get('/api/missions/999999/dispatch')[0], 404)
+
+    def test_node_coordinates_validate_and_survive_re_add(self):
+        self.assertEqual(self.place('A', 10, 10)[0], 201)
+        # Re-adding without coordinates must not erase the placed position.
+        self.assertEqual(self.post('/api/map/nodes', {'id': 'A', 'kind': 'station', 'name': 'A'})[0], 201)
+        _, data = self.post('/api/missions', {'origin': 'A', 'destination': 'B'})
+        _, preview = self.get(f"/api/missions/{data['mission']['id'][2:]}/dispatch")
+        self.assertEqual(preview['dispatch']['origin_position'], {'x': 10, 'y': 10})
+
+    def test_partial_or_out_of_range_coordinates_are_rejected(self):
+        for payload in ({'x': 10}, {'y': 10}, {'x': -1, 'y': 10}, {'x': 101, 'y': 10}, {'x': True, 'y': 10}, {'x': '10', 'y': 10}):
+            with self.subTest(payload=payload):
+                self.assertEqual(self.post('/api/map/nodes', {'id': 'A', 'kind': 'station', 'name': 'A', **payload})[0], 422)
+
+
 if __name__ == '__main__':
     unittest.main()

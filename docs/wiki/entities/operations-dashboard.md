@@ -22,6 +22,9 @@
 - `POST /api/map/nodes|edges|obstacles|route` — مدیریت گراف و محاسبهٔ مسیر.
 - `POST /api/integrations/events` — event نسخهٔ ۱ با `X-Motiva-Signature`؛ برای event تکراری مأموریت جدید ساخته نمی‌شود.
 - `POST /api/integrations/vda5050` — پیام `state` یا `connection` با `agv_id`؛ بدون secret (سطح جداگانه از webhook WMS) و فقط ورودی.
+- `GET /api/missions/<id>/dispatch` — پیشنهاد تخصیص (dry-run) با امتیاز و علت کنارگذاشتن هر ربات.
+- `POST /api/missions/<id>/assign` با `{"auto": true}` — تخصیص خودکار داخل همان تراکنش، همراه با توضیح انتخاب.
+- `POST /api/map/nodes` مختصات اختیاری `x` و `y` (۰ تا ۱۰۰) را می‌پذیرد تا امتیاز فاصله ممکن شود.
 
 ## قراردادها / Edge cases
 - API محلی از SQLite استفاده می‌کند؛ داده‌های ناوگان نمونه و مأموریت‌ها production نیستند.
@@ -33,6 +36,9 @@
 - ربات stale آنلاین شمرده نمی‌شود، هشدار باتری کم برایش جای هشدار آفلاین را نمی‌گیرد و مأموریت نمی‌گیرد.
 - مختصات VDA بر حسب متر روی نقشهٔ ربات است و با `MOTIVA_MAP_EXTENT_METRES` به شبکهٔ ۰ تا ۱۰۰ تبدیل و clamp می‌شود.
 - ساخت order خروجی VDA پیاده‌سازی شده اما هیچ چیزی روی `order/{agv_id}` منتشر نمی‌شود؛ هیچ endpoint ادعای ارسال فرمان به ربات ندارد.
+- تخصیص خودکار ربات‌های `offline`، `charging`، باتری نامشخص و باتری زیر ۲۰ را با علت کنار می‌گذارد و بقیه را با وزن باتری ۰٫۴۰، بار کاری ۰٫۳۵ و فاصله ۰٫۲۵ رتبه‌بندی می‌کند.
+- امتیاز فاصله فقط وقتی استفاده می‌شود که مبدأ مأموریت به گره نقشه دارای مختصات تبدیل شود؛ `distance_used` صریحاً گزارش می‌شود تا UI فاصلهٔ محاسبه‌نشده را القا نکند.
+- وزن‌ها در صورت نبود یک سیگنال بازنرمال می‌شوند و تساوی امتیاز با شناسهٔ ربات قطعی می‌شود.
 - `MOTIVA_HOST` و `MOTIVA_PORT` قابل تنظیم‌اند (پیش‌فرض `127.0.0.1:8787`)؛ در کانتینر روی `0.0.0.0:8787` اجرا می‌شود و مسیر پوشهٔ دیتابیس را می‌سازد.
 - `docker compose up -d --build` سرویس `app` و صفحهٔ فرود nginx را بالا می‌آورد؛ TimescaleDB، EMQX و Keycloak فقط با پروفایل `platform` فعال می‌شوند و کد فعلی از آن‌ها استفاده نمی‌کند.
 
@@ -41,5 +47,7 @@
 - `app/server.py` — API health/overview/robots/telemetry/missions/map/alerts/reports/integrations.
 - `app/navigation.py` — مسیر کوتاه و رزرو گره‌های متعارض.
 - `app/integration.py` — قرارداد event و HMAC.
+- `app/dispatch.py` — امتیازدهی قابل‌توضیح تخصیص خودکار ربات.
 - `app/test_server.py` و `app/test_integration.py` — تست‌های API و قرارداد integration.
+- `app/test_dispatch.py` و `app/test_vda5050.py` — تست‌های واحد امتیازدهی و ترجمهٔ VDA 5050.
 - `Dockerfile`، `docker-compose.yml` و `.github/workflows/quality.yml` — بسته‌بندی کانتینر و بیلد/اسموک‌تست تصویر در CI.

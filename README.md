@@ -126,6 +126,16 @@ A robot counts as offline once its last heartbeat is older than `MOTIVA_HEARTBEA
 
 **Not wired:** nothing publishes orders back to `order/{agv_id}`. `order_message()` builds a valid VDA order, but no command reaches a robot yet. VDA 5050 also defines no traffic coordination, routing or functional safety — those stay fleet-manager work.
 
+## Auto-dispatch
+
+`GET /api/missions/{id}/dispatch` is a dry run that returns who would be chosen, why, and which robots were excluded:
+
+```bash
+curl http://localhost:8787/api/missions/2046/dispatch
+```
+
+`POST /api/missions/{id}/assign` with `{"auto": true}` performs the choice. Robots that are offline, charging, below 20% or unreported are excluded with a reason; the rest are scored on battery, workload and (when the origin names a placed map node) distance. Weights are renormalised when a signal is missing, and `distance_used` says plainly whether proximity was actually considered.
+
 ## معماری و توسعه
 
 - [معماری فنی](./ARCHITECTURE.md)

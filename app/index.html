@@ -45,7 +45,7 @@
   <form id="missionForm">
     <h2 id="dialogTitle">مأموریت جدید</h2><p id="dialogDescription" class="muted"></p>
     <div id="createFields"><label for="origin">مبدأ<input id="origin" name="origin" maxlength="200" required autocomplete="off"></label><label for="destination">مقصد<input id="destination" name="destination" maxlength="200" required autocomplete="off"></label></div>
-    <div id="assignFields" hidden><label for="robotChoice">ربات<select id="robotChoice" name="robot"></select></label><p class="muted">این عملیات فقط رکورد نرم‌افزار را تغییر می‌دهد؛ فرمانی به ربات واقعی ارسال نمی‌شود.</p></div>
+    <div id="assignFields" hidden><label for="robotChoice">ربات<select id="robotChoice" name="robot"></select></label><p id="dispatchHint" class="muted" aria-live="polite"></p><p class="muted">این عملیات فقط رکورد نرم‌افزار را تغییر می‌دهد؛ فرمانی به ربات واقعی ارسال نمی‌شود.</p></div>
     <p id="formError" class="error" role="alert"></p>
     <div class="actions"><button type="button" class="button" id="closeDialog">بازگشت</button><button type="submit" class="button primary" id="submitMission">ثبت مأموریت</button></div>
   </form>
@@ -56,7 +56,9 @@
   const number = new Intl.NumberFormat('fa-IR');
   const statusLabels = {done:'تکمیل شده',running:'در حال اجرا',waiting:'در صف',cancelled:'لغو شده'};
   const robotLabels = {moving:'در حرکت',waiting:'آماده',charging:'در حال شارژ',offline:'آفلاین'};
-  const actionErrors = {robot_offline:'ربات انتخاب‌شده آفلاین یا بدون گزارش تازه است.',robot_not_found:'ربات پیدا نشد.',mission_not_assignable:'وضعیت مأموریت تغییر کرده؛ دوباره به‌روزرسانی کنید.',only_waiting_missions_can_be_cancelled:'فقط مأموریت در صف قابل لغو است.',mission_not_found:'مأموریت پیدا نشد.',origin_and_destination_are_required:'مبدأ و مقصد را وارد کنید.'};
+  const actionErrors = {robot_offline:'ربات انتخاب‌شده آفلاین یا بدون گزارش تازه است.',robot_not_found:'ربات پیدا نشد.',mission_not_assignable:'وضعیت مأموریت تغییر کرده؛ دوباره به‌روزرسانی کنید.',only_waiting_missions_can_be_cancelled:'فقط مأموریت در صف قابل لغو است.',mission_not_found:'مأموریت پیدا نشد.',origin_and_destination_are_required:'مبدأ و مقصد را وارد کنید.',no_eligible_robot:'ربات واجد شرایطی برای تخصیص خودکار وجود ندارد.'};
+  const componentLabels = {battery:'باتری',workload:'بار کاری',distance:'فاصله'};
+  const reasonLabels = {status_offline:'آفلاین یا بدون گزارش تازه',status_charging:'در حال شارژ',battery_unknown:'باتری نامشخص',battery_below_threshold:'باتری کمتر از حد آستانه'};
   const alertLabels = {low_battery:'باتری کم',robot_offline:'بدون گزارش تازه',mission_waiting:'مأموریت در صف',emergency_stop:'توقف اضطراری',protective_field:'ورود به میدان حفاظتی'};
   let latestRobots = [], latestMissions = [], connected = false, refreshing = null, submitting = false, action = 'create', selectedId = '', lastSuccess = null, dialogTrigger = null, toastTimer;
   function escapeHtml(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -143,6 +145,27 @@
     })();
     return refreshing;
   }
+  function renderDispatchHint(dispatch) {
+    if (!dispatch) { $('dispatchHint').textContent = ''; return; }
+    if (!dispatch.selected) { $('dispatchHint').textContent = 'هیچ رباتی واجد شرایط تخصیص خودکار نیست؛ به فهرست ناوگان و وضعیت آفلاین ربات‌ها نگاه کنید.'; return; }
+    const best = dispatch.candidates.find(c => c.id === dispatch.selected);
+    const parts = Object.entries(best.components).map(([key, component]) => `${componentLabels[key] || key} ${number.format(Math.round(component.value * 100))}٪`).join(' / ');
+    const excluded = dispatch.candidates.filter(c => !c.eligible).map(c => `${c.id}: ${reasonLabels[c.reason] || c.reason}`);
+    const distanceNote = dispatch.distance_used ? '' : ' (فاصله محاسبه نشد چون مبدأ به گره نقشه تبدیل نشد)';
+    $('dispatchHint').textContent = `پیشنهاد سیستم: ${best.id} با امتیاز ${number.format(Math.round(best.score * 100))}٪ — ${parts}${distanceNote}` + (excluded.length ? ` | کنار گذاشته‌شده: ${excluded.join('، ')}` : '');
+  }
+  async function loadDispatch(missionId) {
+    $('dispatchHint').textContent = 'در حال محاسبهٔ پیشنهاد…';
+    try {
+      const data = await request(`/api/missions/${encodeURIComponent(missionId.replace('M-',''))}/dispatch`);
+      renderDispatchHint(data.dispatch);
+      if (data.dispatch.selected && document.getElementById(`robotOption-${data.dispatch.selected}`)) {
+        $('robotChoice').value = data.dispatch.selected;
+      }
+    } catch (error) {
+      $('dispatchHint').textContent = 'محاسبهٔ پیشنهاد ممکن نشد؛ می‌توانید دستی انتخاب کنید.';
+    }
+  }
   function openMission(mode, missionId = '') {
     if (!connected || submitting) return;
     dialogTrigger = document.activeElement; action = mode; selectedId = missionId;
@@ -154,14 +177,19 @@
     $('dialogDescription').textContent = mode === 'cancel' ? `مأموریت ${missionId} لغو شود؟ لغو فقط برای مأموریت در صف مجاز است.` : missionId;
     $('submitMission').textContent = {create:'ثبت مأموریت',assign:'تأیید تخصیص',cancel:'تأیید لغو'}[mode];
     $('robotChoice').replaceChildren();
+    const autoOption = document.createElement('option'); autoOption.value = '__auto__'; autoOption.id = 'robotOption-auto';
+    autoOption.textContent = 'تخصیص خودکار (انتخاب سیستم)';
+    $('robotChoice').append(autoOption);
     latestRobots.filter(r => r.status !== 'offline').forEach(r => {
-      const option = document.createElement('option'); option.value = r.id;
+      const option = document.createElement('option'); option.value = r.id; option.id = `robotOption-${r.id}`;
       option.textContent = `${r.id} — ${robotLabels[r.status]} — باتری ${number.format(r.battery)}٪`;
       $('robotChoice').append(option);
     });
     if (mode === 'assign' && !$('robotChoice').value) $('formError').textContent = 'ربات آنلاینی ثبت نشده است.';
+    $('dispatchHint').textContent = '';
     syncControls(); $('missionDialog').showModal();
     $(mode === 'create' ? 'origin' : mode === 'assign' ? 'robotChoice' : 'closeDialog').focus();
+    if (mode === 'assign') loadDispatch(missionId);
   }
   async function submitMission(event) {
     event.preventDefault(); if (submitting || !connected) return;
@@ -170,14 +198,19 @@
       payload = {origin:$('origin').value.trim(),destination:$('destination').value.trim()};
       if (!payload.origin || !payload.destination) { $('formError').textContent = 'مبدأ و مقصد نباید خالی باشند.'; return; }
       path = '/api/missions';
-    } else if (action === 'assign') { payload = {robot:$('robotChoice').value}; if (!payload.robot) return; }
+    } else if (action === 'assign') {
+      const choice = $('robotChoice').value;
+      if (!choice) return;
+      payload = choice === '__auto__' ? {auto: true} : {robot: choice};
+    }
     submitting = true; $('formError').textContent = ''; syncControls();
     try {
-      await request(path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const result = await request(path, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       $('missionDialog').close();
       if (refreshing) await refreshing;
       const refreshed = await refreshOverview();
-      notify(refreshed ? 'عملیات ثبت شد.' : 'عملیات ثبت شد، اما دریافت فهرست جدید ناموفق بود.');
+      const assigned = action === 'assign' && result && result.mission ? `مأموریت به ${result.mission.robot} سپرده شد.` : (action === 'cancel' ? 'مأموریت لغو شد.' : 'مأموریت ثبت شد.');
+      notify(refreshed ? assigned : 'عملیات ثبت شد، اما دریافت فهرست جدید ناموفق بود.');
     } catch (error) {
       $('formError').textContent = error.name === 'AbortError' || error instanceof TypeError ? 'پاسخ دریافت نشد؛ ممکن است عملیات ثبت شده باشد. پیش از تکرار، فهرست را به‌روزرسانی کنید.' : error.message;
     } finally { submitting = false; syncControls(); renderMissions(); }

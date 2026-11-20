@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+import dispatch
 import vda5050
 from navigation import shortest_path
 from integration import decode_event, valid_signature
@@ -36,6 +37,7 @@ SEED_ROBOTS = (
     ("R-12", "charging", 91, 28, 76),
 )
 MISSION_PATH = re.compile(r"^/api/missions/(\d+)/(assign|cancel)$")
+DISPATCH_PATH = re.compile(r"^/api/missions/(\d+)/dispatch$")
 
 
 def connection() -> sqlite3.Connection:
@@ -89,6 +91,12 @@ def initialize_db() -> None:
         db.execute("""CREATE TABLE IF NOT EXISTS map_nodes (
             id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('zone', 'station')),
             name TEXT NOT NULL)""")
+        node_columns = {row["name"] for row in db.execute("PRAGMA table_info(map_nodes)")}
+        for column in ("x", "y"):
+            # Optional grid coordinates let dispatch use distance when a mission
+            # origin names a placed node.
+            if column not in node_columns:
+                db.execute(f"ALTER TABLE map_nodes ADD COLUMN {column} INTEGER")
         db.execute("""CREATE TABLE IF NOT EXISTS map_edges (
             source TEXT NOT NULL, target TEXT NOT NULL,
             PRIMARY KEY(source, target),
@@ -154,6 +162,55 @@ def is_stale(heartbeat: float | None, now: float | None = None) -> bool:
     return current - heartbeat > HEARTBEAT_TIMEOUT_SECONDS
 
 
+def dispatch_candidates(db: sqlite3.Connection, now: float | None = None) -> list[dict[str, Any]]:
+    """Current fleet state shaped for the dispatch scorer."""
+    workloads = {
+        row["robot"]: row["count"]
+        for row in db.execute(
+            "SELECT robot, COUNT(*) AS count FROM missions WHERE status = 'running' GROUP BY robot"
+        )
+    }
+    candidates = []
+    for row in db.execute("SELECT * FROM robots ORDER BY id"):
+        robot = robot_payload(row, now)
+        candidates.append({
+            "id": robot["id"],
+            "status": robot["status"],
+            "battery": robot["battery"],
+            "position": robot["position"],
+            "active_missions": workloads.get(robot["id"], 0),
+        })
+    return candidates
+
+
+def origin_position(db: sqlite3.Connection, origin: str) -> dict[str, int] | None:
+    """Resolve a mission origin to a placed map node, if it names one.
+
+    Origins are free text in the prototype, so an unresolved origin simply
+    drops the distance signal instead of guessing a location.
+    """
+    if not isinstance(origin, str) or not origin.strip():
+        return None
+    row = db.execute(
+        "SELECT x, y FROM map_nodes WHERE id = ? AND x IS NOT NULL AND y IS NOT NULL",
+        (origin.strip(),),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"x": row["x"], "y": row["y"]}
+
+
+def dispatch_preview(mission_row: sqlite3.Row | None = None, origin: str | None = None) -> dict[str, Any]:
+    with connection() as db:
+        now = time.time()
+        candidates = dispatch_candidates(db, now)
+        resolved = origin_position(db, origin if origin is not None else (mission_row["origin"] if mission_row else ""))
+    result = dispatch.rank_robots(candidates, origin_position=resolved)
+    result["origin_position"] = resolved
+    result["heartbeat_timeout_seconds"] = HEARTBEAT_TIMEOUT_SECONDS
+    return result
+
+
 def response_payload() -> dict[str, Any]:
     with connection() as db:
         missions = db.execute("SELECT * FROM missions ORDER BY id DESC LIMIT 10").fetchall()
@@ -200,6 +257,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
+        path = self.path.split("?", 1)[0]
+        dispatch_get = DISPATCH_PATH.match(path)
+        if dispatch_get:
+            self.dispatch_mission(int(dispatch_get.group(1)))
+            return
+        self.path = path
         if self.path == "/":
             body = (Path(__file__).parent / "index.html").read_bytes()
             self.send_response(200)
@@ -384,9 +447,37 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict) or not isinstance(payload.get("id"), str) or not payload["id"].strip() or payload.get("kind") not in {"zone", "station"} or not isinstance(payload.get("name"), str) or not payload["name"].strip():
             self._send(422, {"error": "invalid_map_node"})
             return
+        coords: dict[str, int | None] = {}
+        for axis in ("x", "y"):
+            value = payload.get(axis)
+            if value is None:
+                coords[axis] = None
+            elif isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+                self._send(422, {"error": "invalid_map_node_coordinates"})
+                return
+            else:
+                coords[axis] = value
+        if (coords["x"] is None) != (coords["y"] is None):
+            # A single axis is not a location; reject rather than half-place it.
+            self._send(422, {"error": "invalid_map_node_coordinates"})
+            return
+        node_id, name = payload["id"].strip(), payload["name"].strip()
         with connection() as db:
-            db.execute("INSERT OR REPLACE INTO map_nodes(id, kind, name) VALUES (?, ?, ?)", (payload["id"].strip(), payload["kind"], payload["name"].strip()))
-        self._send(201, {"node": {"id": payload["id"].strip(), "kind": payload["kind"], "name": payload["name"].strip()}})
+            if coords["x"] is None:
+                # Preserve any coordinates already placed on this node.
+                db.execute(
+                    "INSERT INTO map_nodes(id, kind, name) VALUES (?, ?, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name",
+                    (node_id, payload["kind"], name),
+                )
+            else:
+                db.execute(
+                    "INSERT INTO map_nodes(id, kind, name, x, y) VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, x = excluded.x, y = excluded.y",
+                    (node_id, payload["kind"], name, coords["x"], coords["y"]),
+                )
+            row = db.execute("SELECT * FROM map_nodes WHERE id = ?", (node_id,)).fetchone()
+        self._send(201, {"node": dict(row)})
 
     def add_map_edge(self, payload: Any) -> None:
         if not isinstance(payload, dict) or not all(isinstance(payload.get(key), str) and payload[key].strip() for key in ("source", "target")) or payload["source"] == payload["target"]:
@@ -447,29 +538,62 @@ class Handler(BaseHTTPRequestHandler):
         self._send(201, {"mission": mission_payload(row)})
 
     def assign_mission(self, mission_id: int, payload: Any) -> None:
-        robot_id = payload.get("robot") if isinstance(payload, dict) else None
-        if not isinstance(robot_id, str) or not robot_id.strip():
+        body = payload if isinstance(payload, dict) else {}
+        auto = body.get("auto") is True
+        robot_id = body.get("robot")
+        if not auto and (not isinstance(robot_id, str) or not robot_id.strip()):
             self._send(422, {"error": "robot_id_is_required"})
             return
         with connection() as db:
             db.execute("BEGIN IMMEDIATE")
             mission = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
-            robot = db.execute("SELECT * FROM robots WHERE id = ?", (robot_id.strip(),)).fetchone()
             if mission is None:
                 self._send(404, {"error": "mission_not_found"})
                 return
+            if mission["status"] not in {"waiting", "cancelled"}:
+                self._send(409, {"error": "mission_not_assignable"})
+                return
+            dispatch_result = None
+            if auto:
+                dispatch_result = self._rank_for(db, mission["origin"])
+                if dispatch_result["selected"] is None:
+                    self._send(409, {"error": "no_eligible_robot", "dispatch": dispatch_result})
+                    return
+                robot_id = dispatch_result["selected"]
+            robot = db.execute("SELECT * FROM robots WHERE id = ?", (robot_id.strip(),)).fetchone()
             if robot is None:
                 self._send(422, {"error": "robot_not_found"})
                 return
             if robot_payload(robot)["status"] == "offline":
                 self._send(409, {"error": "robot_offline"})
                 return
+            db.execute("UPDATE missions SET robot = ?, status = 'running', started_at = 'اکنون' WHERE id = ?", (robot["id"], mission_id))
+            row = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
+        response: dict[str, Any] = {"mission": mission_payload(row)}
+        if dispatch_result is not None:
+            response["dispatch"] = dispatch_result
+        self._send(200, response)
+
+    @staticmethod
+    def _rank_for(db: sqlite3.Connection, origin: str) -> dict[str, Any]:
+        """Rank robots against the live fleet, reusing the open transaction."""
+        resolved = origin_position(db, origin)
+        result = dispatch.rank_robots(dispatch_candidates(db), origin_position=resolved)
+        result["origin_position"] = resolved
+        return result
+
+    def dispatch_mission(self, mission_id: int) -> None:
+        """Dry-run: who would be chosen, and why, without assigning anything."""
+        with connection() as db:
+            mission = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
+            if mission is None:
+                self._send(404, {"error": "mission_not_found"})
+                return
             if mission["status"] not in {"waiting", "cancelled"}:
                 self._send(409, {"error": "mission_not_assignable"})
                 return
-            db.execute("UPDATE missions SET robot = ?, status = 'running', started_at = 'اکنون' WHERE id = ?", (robot["id"], mission_id))
-            row = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
-        self._send(200, {"mission": mission_payload(row)})
+            result = dispatch_preview(mission)
+        self._send(200, {"mission": mission_payload(mission), "dispatch": result})
 
     def cancel_mission(self, mission_id: int) -> None:
         with connection() as db:
