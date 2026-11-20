@@ -21,10 +21,20 @@ class EligibilityTests(unittest.TestCase):
         self.assertEqual(reasons['R-2'], 'status_charging')
 
     def test_low_battery_is_excluded_with_a_reason(self):
-        result = dispatch.rank_robots([robot('R-1', battery=19), robot('R-2', battery=21)])
+        result = dispatch.rank_robots([robot('R-1', battery=19), robot('R-2', battery=30)])
         self.assertEqual(result['selected'], 'R-2')
         reasons = {c['id']: c['reason'] for c in result['candidates']}
         self.assertEqual(reasons['R-1'], 'battery_below_threshold')
+
+    def test_dispatch_threshold_matches_the_charge_threshold(self):
+        # A robot that qualifies to charge must not still accept new missions,
+        # otherwise dispatch keeps deferring the charge it says the robot needs.
+        import charging
+        self.assertEqual(dispatch.MIN_DISPATCH_BATTERY, charging.CHARGE_THRESHOLD + 1)
+        at_threshold = dispatch.rank_robots([robot('R-1', battery=charging.CHARGE_THRESHOLD)])
+        self.assertIsNone(at_threshold['selected'])
+        just_above = dispatch.rank_robots([robot('R-1', battery=charging.CHARGE_THRESHOLD + 1)])
+        self.assertEqual(just_above['selected'], 'R-1')
 
     def test_unknown_battery_is_excluded_rather_than_assumed(self):
         result = dispatch.rank_robots([robot('R-1', battery=None), robot('R-2')])

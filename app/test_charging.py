@@ -119,5 +119,85 @@ class LeaseTests(unittest.TestCase):
         self.assertEqual(result['reason'], 'all_chargers_busy')
 
 
+class QueueTests(unittest.TestCase):
+    def test_lowest_battery_is_admitted_first(self):
+        entries = [charging.queue_entry('R-1', battery=20, requested_at=0), charging.queue_entry('R-2', battery=8, requested_at=50)]
+        result = charging.serve_queue(entries, 1, now=100)
+        self.assertEqual(result['admit'], ['R-2'])
+
+    def test_no_free_bay_admits_nobody(self):
+        entries = [charging.queue_entry('R-1', battery=8, requested_at=0)]
+        self.assertEqual(charging.serve_queue(entries, 0, now=100)['admit'], [])
+
+    def test_more_bays_than_waiters_admits_everyone(self):
+        entries = [charging.queue_entry('R-1', battery=8, requested_at=0), charging.queue_entry('R-2', battery=9, requested_at=0)]
+        result = charging.serve_queue(entries, 5, now=100)
+        self.assertEqual(sorted(result['admit']), ['R-1', 'R-2'])
+        self.assertEqual(result['waiting'], [])
+
+    def test_critical_robot_jumps_ahead_of_a_lower_but_less_urgent_one(self):
+        entries = [charging.queue_entry('R-1', battery=20, requested_at=0), charging.queue_entry('R-2', battery=18, requested_at=5, critical=True)]
+        result = charging.serve_queue(entries, 1, now=100)
+        self.assertEqual(result['admit'], ['R-2'])
+
+    def test_a_starving_robot_jumps_one_with_a_slightly_lower_battery(self):
+        # R-old waited far past the limit with a higher battery; R-new is lower
+        # but only just arrived. Starvation protection must win here.
+        entries = [
+            charging.queue_entry('R-old', battery=24, requested_at=0),
+            charging.queue_entry('R-new', battery=20, requested_at=995),
+        ]
+        result = charging.serve_queue(entries, 1, now=1000)
+        self.assertEqual(result['admit'], ['R-old'])
+        self.assertTrue(result['waiting'][0]['escalated'] is False)
+
+    def test_a_long_wait_beats_a_marginally_lower_battery(self):
+        entries = [
+            charging.queue_entry('R-old', battery=22, requested_at=0),      # waited 1000s
+            charging.queue_entry('R-new', battery=6, requested_at=990),     # waited 10s
+        ]
+        result = charging.serve_queue(entries, 1, now=1000)
+        self.assertEqual(result['admit'], ['R-old'])
+
+    def test_waited_time_and_escalation_reason_are_reported(self):
+        entries = [charging.queue_entry('R-1', battery=10, requested_at=0)]
+        entry = charging.serve_queue(entries, 0, now=700)['waiting'][0]
+        self.assertEqual(entry['waited_seconds'], 700)
+        self.assertTrue(entry['escalated'])
+        self.assertEqual(entry['escalation_reason'], 'starving')
+
+    def test_non_escalated_entry_reports_no_reason(self):
+        entries = [charging.queue_entry('R-1', battery=10, requested_at=0)]
+        entry = charging.serve_queue(entries, 0, now=100)['waiting'][0]
+        self.assertFalse(entry['escalated'])
+        self.assertIsNone(entry['escalation_reason'])
+
+    def test_ties_break_deterministically(self):
+        entries = [charging.queue_entry('R-b', battery=10, requested_at=0), charging.queue_entry('R-a', battery=10, requested_at=0)]
+        self.assertEqual(charging.serve_queue(entries, 1, now=100)['admit'], ['R-a'])
+
+    def test_malformed_entries_are_ignored_not_admitted(self):
+        entries = [None, 'x', {'robot_id': 'R-1'}, charging.queue_entry('R-2', battery=10, requested_at=0)]
+        result = charging.serve_queue(entries, 1, now=100)
+        self.assertEqual(result['admit'], ['R-2'])
+
+    def test_malformed_free_bay_count_admits_nobody(self):
+        entries = [charging.queue_entry('R-1', battery=10, requested_at=0)]
+        self.assertEqual(charging.serve_queue(entries, True, now=100)['admit'], [])
+
+    def test_invalid_queue_entry_inputs_are_rejected(self):
+        for kwargs in ({'robot_id': '', 'battery': 10, 'requested_at': 0},
+                       {'robot_id': 'R-1', 'battery': True, 'requested_at': 0},
+                       {'robot_id': 'R-1', 'battery': 'low', 'requested_at': 0},
+                       {'robot_id': 'R-1', 'battery': 10, 'requested_at': None}):
+            with self.subTest(kwargs=kwargs):
+                self.assertIsNone(charging.queue_entry(**kwargs))
+
+    def test_escalation_lists_only_stuck_robots(self):
+        entries = [charging.queue_entry('R-fine', battery=10, requested_at=950), charging.queue_entry('R-stuck', battery=10, requested_at=0)]
+        stuck = charging.escalate(entries, now=1000)
+        self.assertEqual([entry['robot_id'] for entry in stuck], ['R-stuck'])
+
+
 if __name__ == '__main__':
     unittest.main()

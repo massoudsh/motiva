@@ -104,6 +104,33 @@ it protects battery life while keeping material moving.
   via the VDA bridge) releases its bay immediately, otherwise a dead lease would
   block the charger until expiry.
 
+### Wait queue and escalation
+
+A robot refused because every bay was busy is stored in `charger_queue` rather
+than discarded, so a stranded low-battery robot stays visible.
+
+- **Order:** critical robots first, then robots waiting past
+  `STARVATION_LIMIT_SECONDS` (600s), then lowest battery, then longest wait, then
+  id. Every entry reports `waited_seconds` and `escalated`, so a robot jumping the
+  queue is explained, not mysterious.
+- **Admission is an offer, not a silent assignment.** `GET /api/chargers` returns
+  `admit_now` — robots that should take a newly free bay — and they leave the
+  queue once they actually charge.
+- **Escalation is visible:** a critical or starving waiter raises a
+  `charger_queue_stuck` alert carrying the reason and wait time.
+
+### Dispatch and charging share one threshold
+
+`MIN_DISPATCH_BATTERY` is derived from `CHARGE_THRESHOLD`, not duplicated. Before
+this, dispatch excluded robots below 20% while charging began at 25%, so a robot
+at 22% kept accepting missions while dispatch already flagged it for charging —
+the work deferred the charge indefinitely. A robot at or below the charge
+threshold now receives no new missions.
+
+**Known limit:** the queue is served on request, not by a background worker —
+admission happens when `/api/chargers` or a charge request is called, not the
+instant a bay frees up under an idle system.
+
 Endpoints: `GET /api/chargers`, `POST /api/chargers`,
 `GET /api/robots/{id}/charge` (dry run) and `POST /api/robots/{id}/charge`.
 Low-battery alerts now carry `charging_available` and the suggested `charger`, so

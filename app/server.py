@@ -120,6 +120,11 @@ def initialize_db() -> None:
             charger_id TEXT PRIMARY KEY, robot_id TEXT NOT NULL,
             held_until REAL NOT NULL, since TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(charger_id) REFERENCES chargers(id))""")
+        # Robots refused because every bay was busy wait here instead of being
+        # forgotten, so a stuck low-battery robot is visible and can be escalated.
+        db.execute("""CREATE TABLE IF NOT EXISTS charger_queue (
+            robot_id TEXT PRIMARY KEY, battery INTEGER NOT NULL,
+            requested_at REAL NOT NULL, critical INTEGER NOT NULL DEFAULT 0)""")
         if not db.execute("SELECT 1 FROM missions LIMIT 1").fetchone():
             db.executemany("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", SEED_MISSIONS)
         db.execute("INSERT OR IGNORE INTO mission_details(mission_id) SELECT id FROM missions")
@@ -351,6 +356,30 @@ def release_charger(db: sqlite3.Connection, *, robot_id: str | None = None, char
     if charger_id is not None:
         return db.execute("DELETE FROM charger_occupancies WHERE charger_id = ?", (charger_id,)).rowcount
     return 0
+
+
+def read_queue(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [
+        {"robot_id": row["robot_id"], "battery": row["battery"], "requested_at": row["requested_at"], "critical": bool(row["critical"])}
+        for row in db.execute("SELECT * FROM charger_queue")
+    ]
+
+
+def enqueue_for_charge(db: sqlite3.Connection, robot: dict[str, Any], now: float) -> dict[str, Any] | None:
+    """Remember a robot that wanted a bay but could not get one."""
+    entry = charging.queue_entry(robot["id"], battery=robot["battery"], requested_at=now, critical=robot["battery"] <= charging.CRITICAL_BATTERY)
+    if entry is None:
+        return None
+    db.execute(
+        "INSERT INTO charger_queue(robot_id, battery, requested_at, critical) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(robot_id) DO UPDATE SET battery = excluded.battery, critical = excluded.critical",
+        (entry["robot_id"], entry["battery"], entry["requested_at"], int(entry["critical"])),
+    )
+    return entry
+
+
+def dequeue(db: sqlite3.Connection, robot_id: str) -> int:
+    return db.execute("DELETE FROM charger_queue WHERE robot_id = ?", (robot_id,)).rowcount
 
 
 def charge_plan(robot_row: sqlite3.Row | None = None, now: float | None = None) -> dict[str, Any]:
@@ -621,6 +650,18 @@ class Handler(BaseHTTPRequestHandler):
             if robot["field_violation"]:
                 alerts.append({"type": "protective_field", "severity": "warning", "robot": robot["id"]})
         alerts.extend({"type": "mission_waiting", "severity": "info", "mission": f"M-{row['id']}", "origin": row["origin"], "destination": row["destination"]} for row in missions)
+        with connection() as db:
+            stuck = charging.escalate(read_queue(db), now)
+        alerts.extend(
+            {
+                "type": "charger_queue_stuck",
+                "severity": "critical" if entry["escalation_reason"] == "critical" else "warning",
+                "robot": entry["robot_id"],
+                "waited_seconds": entry["waited_seconds"],
+                "reason": entry["escalation_reason"],
+            }
+            for entry in stuck
+        )
         self._send(200, {"alerts": alerts})
 
     def get_report(self) -> None:
@@ -842,7 +883,8 @@ class Handler(BaseHTTPRequestHandler):
         with connection() as db:
             chargers = read_chargers(db)
             occupancies = charging_occupancies(db, now)
-        self._send(200, {"chargers": chargers, "occupancies": occupancies})
+            queue = charging.serve_queue(read_queue(db), max(0, len(chargers) - len(occupancies)), now=now)
+        self._send(200, {"chargers": chargers, "occupancies": occupancies, "waiting": queue["waiting"], "admit_now": queue["admit"]})
 
     def get_charge_plan(self, robot_id: str) -> None:
         with connection() as db:
@@ -884,41 +926,57 @@ class Handler(BaseHTTPRequestHandler):
         self._send(201, {"charger": read_chargers_row(row)})
 
     def start_charge(self, robot_id: str, payload: Any) -> None:
-        """Send a robot to a charger, honouring the charger's single occupant."""
+        """Send a robot to a charger, honouring the charger's single occupant.
+
+        A robot refused for lack of a bay is queued rather than forgotten, so a
+        stranded low-battery robot stays visible and can escalate later.
+        """
         body = payload if isinstance(payload, dict) else {}
         requested = body.get("charger")
         if requested is not None and (not isinstance(requested, str) or not requested.strip()):
             self._send(422, {"error": "invalid_charger"})
             return
         now = time.time()
+
+        outcome: dict[str, Any] = {}
         with connection() as db:
             db.execute("BEGIN IMMEDIATE")
             robot = db.execute("SELECT * FROM robots WHERE id = ?", (robot_id,)).fetchone()
             if robot is None:
-                self._send(404, {"error": "robot_not_found"})
-                return
-            plan = charge_plan(robot, now)
-            if not plan["charge"]:
-                self._send(409, {"error": "charging_not_required", "plan": plan})
-                return
-            allocation = plan["charger"]
-            if requested is not None:
-                match = next((c for c in allocation["available"] if c["id"] == requested.strip()), None)
-                if match is None:
-                    self._send(409, {"error": "charger_unavailable", "plan": plan})
-                    return
-                allocation = {**allocation, "selected": requested.strip()}
-            if allocation["selected"] is None:
-                self._send(409, {"error": allocation["reason"] or "no_charger_available", "plan": plan})
-                return
-            lease = charging.lease_charger(allocation["selected"], robot["id"], now=now)
-            conflict = claim_charger(db, lease, now)
-            if conflict:
-                self._send(409, {"error": "charger_busy", "conflict": conflict})
-                return
-            db.execute("UPDATE robots SET status = 'charging' WHERE id = ?", (robot["id"],))
-            updated = db.execute("SELECT * FROM robots WHERE id = ?", (robot["id"],)).fetchone()
-        self._send(200, {"robot": robot_payload(updated), "charger": allocation["selected"], "plan": allocation})
+                outcome = {"status": 404, "body": {"error": "robot_not_found"}}
+            else:
+                outcome = self._try_start_charge(db, robot, requested, now)
+            # Committing here keeps a refused robot's queue entry even though the
+            # request failed: the point is to remember it.
+        self._send(outcome["status"], outcome["body"])
+
+    def _try_start_charge(self, db: sqlite3.Connection, robot: sqlite3.Row, requested: str | None, now: float) -> dict[str, Any]:
+        plan = charge_plan(robot, now)
+        if not plan["charge"]:
+            dequeue(db, robot["id"])
+            return {"status": 409, "body": {"error": "charging_not_required", "plan": plan}}
+
+        allocation = plan["charger"]
+        if requested is not None and not any(c["id"] == requested.strip() for c in allocation["available"]):
+            queued = enqueue_for_charge(db, robot_payload(robot, now), now)
+            return {"status": 409, "body": {"error": "charger_unavailable", "plan": plan, "queued": queued is not None}}
+        if allocation["selected"] is None:
+            queued = enqueue_for_charge(db, robot_payload(robot, now), now)
+            return {"status": 409, "body": {"error": allocation["reason"] or "no_charger_available", "plan": plan, "queued": queued is not None}}
+
+        lease = charging.lease_charger(requested.strip() if requested is not None else allocation["selected"], robot["id"], now=now)
+        conflict = claim_charger(db, lease, now)
+        if conflict:
+            queued = enqueue_for_charge(db, robot_payload(robot, now), now)
+            return {"status": 409, "body": {"error": "charger_busy", "conflict": conflict, "queued": queued is not None}}
+
+        db.execute("UPDATE robots SET status = 'charging' WHERE id = ?", (robot["id"],))
+        dequeue(db, robot["id"])
+        updated = db.execute("SELECT * FROM robots WHERE id = ?", (robot["id"],)).fetchone()
+        return {
+            "status": 200,
+            "body": {"robot": robot_payload(updated), "charger": lease["charger_id"], "plan": allocation},
+        }
 
     def update_telemetry(self, payload: Any) -> None:
         if not isinstance(payload, dict) or not isinstance(payload.get("id"), str):

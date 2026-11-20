@@ -120,3 +120,89 @@ def lease_charger(charger_id: str, robot_id: str, *, now: float, seconds: float 
         "robot_id": robot_id.strip(),
         "held_until": float(now) + float(seconds),
     }
+
+
+# A robot waiting this long is escalated: it may jump robots whose battery,
+# while low, is higher than its own.
+STARVATION_LIMIT_SECONDS = 600.0
+
+
+def queue_entry(robot_id: str, *, battery: int, requested_at: float, critical: bool = False) -> dict[str, Any] | None:
+    """Build a waiting entry, or None when the input cannot represent one."""
+    if not isinstance(robot_id, str) or not robot_id.strip():
+        return None
+    if isinstance(battery, bool) or not isinstance(battery, int):
+        return None
+    if isinstance(requested_at, bool) or not isinstance(requested_at, (int, float)):
+        return None
+    return {
+        "robot_id": robot_id.strip(),
+        "battery": battery,
+        "requested_at": float(requested_at),
+        "critical": bool(critical),
+    }
+
+
+def queue_priority(entry: dict[str, Any], now: float, starvation_limit: float = STARVATION_LIMIT_SECONDS) -> dict[str, Any]:
+    """Order waiting robots without letting any starve.
+
+    A critical robot goes first, then robots that have waited past the starvation
+    limit, then by battery. Ties break on arrival time and then id so the queue
+    is deterministic. The returned ``escalated`` flag says which rule fired, so a
+    robot jumping the queue is visible rather than mysterious.
+    """
+    waited = max(0.0, float(now) - float(entry.get("requested_at") or 0.0))
+    escalated = bool(entry.get("critical")) or waited >= starvation_limit
+    return {
+        **entry,
+        "waited_seconds": round(waited, 1),
+        "escalated": escalated,
+        "escalation_reason": "critical" if entry.get("critical") else ("starving" if waited >= starvation_limit else None),
+        # Sort key: escalated first, then lowest battery, then longest wait, then id.
+        "sort_key": (0 if escalated else 1, entry.get("battery", 0), -waited, str(entry.get("robot_id"))),
+    }
+
+
+def is_valid_entry(entry: Any) -> bool:
+    """A queue entry must carry the fields the ordering rules rely on."""
+    return (
+        isinstance(entry, dict)
+        and isinstance(entry.get("robot_id"), str)
+        and bool(entry["robot_id"].strip())
+        and isinstance(entry.get("battery"), int)
+        and not isinstance(entry.get("battery"), bool)
+        and isinstance(entry.get("requested_at"), (int, float))
+        and not isinstance(entry.get("requested_at"), bool)
+    )
+
+
+def serve_queue(
+    entries: list[dict[str, Any]],
+    free_bays: int,
+    *,
+    now: float,
+    starvation_limit: float = STARVATION_LIMIT_SECONDS,
+) -> dict[str, Any]:
+    """Take the next robots off the queue for however many bays just freed up."""
+    prioritised = [queue_priority(entry, now, starvation_limit) for entry in entries if is_valid_entry(entry)]
+    prioritised.sort(key=lambda entry: entry["sort_key"])
+    for entry in prioritised:
+        entry.pop("sort_key", None)
+    slots = max(0, int(free_bays)) if not isinstance(free_bays, bool) else 0
+    return {
+        "admit": [entry["robot_id"] for entry in prioritised[:slots]],
+        "waiting": prioritised[slots:],
+        "free_bays": slots,
+    }
+
+
+def escalate(entries: list[dict[str, Any]], now: float, starvation_limit: float = STARVATION_LIMIT_SECONDS) -> list[dict[str, Any]]:
+    """Entries that should raise an operator alert because they are stuck."""
+    stuck = []
+    for entry in entries:
+        if not is_valid_entry(entry):
+            continue
+        prioritised = queue_priority(entry, now, starvation_limit)
+        if prioritised["escalated"]:
+            stuck.append(prioritised)
+    return stuck

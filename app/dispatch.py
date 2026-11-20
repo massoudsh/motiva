@@ -13,8 +13,13 @@ from __future__ import annotations
 
 from typing import Any
 
-# A robot below this charge should not receive new work.
-MIN_DISPATCH_BATTERY = 20
+from charging import CHARGE_THRESHOLD
+
+# A robot at or below this charge should not receive new work. It is derived
+# from the charging threshold on purpose: a robot that qualifies to charge but
+# still accepts missions would keep deferring the charge dispatch itself says it
+# needs. One point above, because charging is inclusive at the threshold.
+MIN_DISPATCH_BATTERY = CHARGE_THRESHOLD + 1
 
 WEIGHTS = {"battery": 0.4, "workload": 0.35, "distance": 0.25}
 

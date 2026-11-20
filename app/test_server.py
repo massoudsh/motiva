@@ -527,5 +527,88 @@ class ChargingEndpointTests(OperationsFixture):
         self.assertEqual(alert['charger'], 'C1')
 
 
+class ChargeQueueTests(OperationsFixture):
+    def setUp(self):
+        super().setUp()
+        self.post('/api/chargers', {'id': 'C1', 'name': 'Bay 1'})
+
+    def drain(self, robot_id, battery):
+        self.post('/api/telemetry', {'id': robot_id, 'status': 'waiting', 'battery': battery, 'position': {'x': 10, 'y': 10}})
+
+    def test_refused_robot_is_remembered_in_the_queue(self):
+        self.drain('R-01', 15)
+        self.post('/api/robots/R-01/charge', {})
+        self.drain('R-04', 12)
+        status, data = self.post('/api/robots/R-04/charge', {})
+        self.assertEqual(status, 409)
+        self.assertTrue(data['queued'])
+
+        _, listing = self.get('/api/chargers')
+        self.assertEqual([entry['robot_id'] for entry in listing['waiting']], ['R-04'])
+        self.assertEqual(listing['admit_now'], [])
+
+    def test_admitted_robot_is_offered_the_freed_bay(self):
+        self.drain('R-01', 15)
+        self.post('/api/robots/R-01/charge', {})
+        self.drain('R-04', 12)
+        self.post('/api/robots/R-04/charge', {})
+        # R-01 leaves the bay, freeing it; the waiter is offered the bay now.
+        self.drain('R-01', 90)
+        _, listing = self.get('/api/chargers')
+        self.assertEqual(listing['admit_now'], ['R-04'])
+        # Once admitted it is no longer "still waiting".
+        self.assertEqual(listing['waiting'], [])
+
+        self.assertEqual(self.post('/api/robots/R-04/charge', {})[0], 200)
+        _, listing = self.get('/api/chargers')
+        self.assertEqual(listing['waiting'], [])
+        self.assertEqual(listing['admit_now'], [])
+
+    def test_lowest_battery_waiter_is_admitted_first(self):
+        self.drain('R-01', 15)
+        self.post('/api/robots/R-01/charge', {})
+        self.drain('R-04', 18)
+        self.post('/api/robots/R-04/charge', {})
+        self.drain('R-07', 8)
+        self.post('/api/robots/R-07/charge', {})
+        self.drain('R-01', 90)  # bay free
+        _, listing = self.get('/api/chargers')
+        self.assertEqual(listing['admit_now'], ['R-07'])
+
+    def test_robot_that_no_longer_needs_charge_is_dequeued(self):
+        self.drain('R-01', 15)
+        self.post('/api/robots/R-01/charge', {})
+        self.drain('R-04', 12)
+        self.post('/api/robots/R-04/charge', {})
+        # R-04 gets topped up elsewhere before it ever reaches a bay.
+        self.drain('R-04', 95)
+        self.post('/api/robots/R-04/charge', {})
+        _, listing = self.get('/api/chargers')
+        self.assertEqual(listing['waiting'], [])
+
+    def test_stuck_queue_entry_raises_an_alert(self):
+        self.drain('R-01', 15)
+        self.post('/api/robots/R-01/charge', {})
+        self.drain('R-04', 9)
+        self.post('/api/robots/R-04/charge', {})
+        # Pretend R-04 has been waiting well past the starvation limit.
+        with sqlite3.connect(server.DB_PATH) as db:
+            db.execute("UPDATE charger_queue SET requested_at = ? WHERE robot_id = 'R-04'", (time.time() - 1200,))
+        _, alerts = self.get('/api/alerts')
+        stuck = [a for a in alerts['alerts'] if a['type'] == 'charger_queue_stuck']
+        self.assertEqual([a['robot'] for a in stuck], ['R-04'])
+        self.assertEqual(stuck[0]['reason'], 'starving')
+
+    def test_critical_waiter_escalates_immediately(self):
+        self.drain('R-01', 15)
+        self.post('/api/robots/R-01/charge', {})
+        self.drain('R-04', 3)
+        self.post('/api/robots/R-04/charge', {})
+        _, alerts = self.get('/api/alerts')
+        stuck = [a for a in alerts['alerts'] if a['type'] == 'charger_queue_stuck']
+        self.assertEqual(stuck[0]['reason'], 'critical')
+        self.assertEqual(stuck[0]['severity'], 'critical')
+
+
 if __name__ == '__main__':
     unittest.main()

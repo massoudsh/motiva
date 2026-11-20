@@ -164,7 +164,9 @@ curl -X POST http://localhost:8787/api/robots/R-01/charge -H 'Content-Type: appl
 
 A robot is sent to charge at or below 25% (5% is flagged critical), and never while offline, already charging, or with an unknown battery. The nearest free bay wins; requesting an occupied one returns `charger_unavailable` rather than silently reassigning it. Leaving the bay — reporting `moving` or `waiting` over HTTP or VDA 5050 — releases it immediately.
 
-There is no charging queue: a robot refused because all bays are busy must be retried.
+A robot refused because every bay is busy is queued rather than forgotten. `GET /api/chargers` returns `waiting` and `admit_now`: critical robots go first, then anyone waiting past 10 minutes, then lowest battery. A critical or starving waiter raises a `charger_queue_stuck` alert with its reason and wait time.
+
+Dispatch uses the same threshold: a robot at or below 25% is not offered new missions, so it cannot keep deferring the charge it needs.
 
 ## معماری و توسعه
 

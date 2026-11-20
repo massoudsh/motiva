@@ -59,7 +59,7 @@
   const actionErrors = {robot_offline:'ربات انتخاب‌شده آفلاین یا بدون گزارش تازه است.',robot_not_found:'ربات پیدا نشد.',mission_not_assignable:'وضعیت مأموریت تغییر کرده؛ دوباره به‌روزرسانی کنید.',only_waiting_missions_can_be_cancelled:'فقط مأموریت در صف قابل لغو است.',mission_not_found:'مأموریت پیدا نشد.',origin_and_destination_are_required:'مبدأ و مقصد را وارد کنید.',no_eligible_robot:'ربات واجد شرایطی برای تخصیص خودکار وجود ندارد.',charging_not_required:'این ربات در حال حاضر نیازی به شارژ ندارد.',no_chargers_configured:'هنوز شارژری ثبت نشده است.',all_chargers_busy:'همهٔ شارژرها اشغال‌اند.',charger_unavailable:'شارژر انتخاب‌شده در دسترس نیست.',charger_busy:'شارژر همین حالا توسط ربات دیگری گرفته شد.'};
   const componentLabels = {battery:'باتری',workload:'بار کاری',distance:'فاصله'};
   const reasonLabels = {status_offline:'آفلاین یا بدون گزارش تازه',status_charging:'در حال شارژ',battery_unknown:'باتری نامشخص',battery_below_threshold:'باتری کمتر از حد آستانه'};
-  const alertLabels = {low_battery:'باتری کم',robot_offline:'بدون گزارش تازه',mission_waiting:'مأموریت در صف',emergency_stop:'توقف اضطراری',protective_field:'ورود به میدان حفاظتی'};
+  const alertLabels = {low_battery:'باتری کم',robot_offline:'بدون گزارش تازه',mission_waiting:'مأموریت در صف',emergency_stop:'توقف اضطراری',protective_field:'ورود به میدان حفاظتی',charger_queue_stuck:'در صف شارژ مانده'};
   let latestRobots = [], latestMissions = [], connected = false, refreshing = null, submitting = false, action = 'create', selectedId = '', lastSuccess = null, dialogTrigger = null, toastTimer;
   function escapeHtml(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function notify(message) { clearTimeout(toastTimer); $('toast').textContent = message; toastTimer = setTimeout(() => { $('toast').textContent = ''; }, 5000); }
@@ -102,13 +102,23 @@
       $('robotLayer').append(marker);
     });
   }
+  function alertDetail(alert) {
+    if (alert.type === 'charger_queue_stuck') {
+      const waited = Math.round(alert.waited_seconds || 0);
+      return ` (${{critical:'باتری بحرانی',starving:'بیش از حد انتظار کشیده'}[alert.reason] || 'در انتظار'}; ${number.format(waited)} ثانیه در صف)`;
+    }
+    if (alert.type === 'low_battery' && 'charging_available' in alert) {
+      return alert.charging_available ? ` (شارژر آزاد: ${escapeHtml(alert.charger || '—')})` : ' (شارژر آزادی وجود ندارد)';
+    }
+    return '';
+  }
   function renderAlerts(alerts) {
     $('alerts').hidden = alerts.length === 0;
     $('alertCount').textContent = alerts.length ? `${number.format(alerts.length)} مورد` : '';
     $('alertList').innerHTML = alerts.map(alert => {
       const subject = alert.robot || alert.mission || '—';
       const label = alertLabels[alert.type] || 'هشدار عملیاتی';
-      return `<p class="${alert.severity === 'critical' ? 'error' : 'muted'}"><bdi>${escapeHtml(subject)}</bdi> — ${label}</p>`;
+      return `<p class="${alert.severity === 'critical' ? 'error' : 'muted'}"><bdi>${escapeHtml(subject)}</bdi> — ${label}${alertDetail(alert)}</p>`;
     }).join('');
   }
   function syncControls() {
