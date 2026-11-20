@@ -32,7 +32,7 @@
     </section>
     <div class="grid">
       <section class="card" id="mapSection" aria-labelledby="mapTitle"><div class="card-head"><h2 id="mapTitle">موقعیت‌های ثبت‌شده</h2><span class="muted">نقشه شماتیک</span></div><div class="map" role="img" aria-label="موقعیت ربات‌ها؛ جزئیات متنی در جدول ناوگان"><div class="robot-layer" id="robotLayer"></div></div><div class="map-note">مختصات نسبی ۰ تا ۱۰۰؛ این تصویر نقشه عملیاتی یا مسیر ناوبری نیست.</div></section>
-      <section class="card" id="fleet" aria-labelledby="fleetTitle"><div class="card-head"><h2 id="fleetTitle">ناوگان ربات‌ها</h2></div><div class="table-wrap"><table><caption>وضعیت ذخیره‌شده؛ تازگی ارتباط سخت‌افزاری تأیید نمی‌شود.</caption><thead><tr><th scope="col">ربات</th><th scope="col">وضعیت</th><th scope="col">باتری</th><th scope="col">آخرین گزارش</th></tr></thead><tbody id="robotRows"><tr><td colspan="4" class="empty">در انتظار داده</td></tr></tbody></table></div></section>
+      <section class="card" id="fleet" aria-labelledby="fleetTitle"><div class="card-head"><h2 id="fleetTitle">ناوگان ربات‌ها</h2></div><div class="table-wrap"><table><caption>وضعیت آفلاین از تازگی آخرین heartbeat محاسبه می‌شود؛ ربات بدون گزارش تازه هرگز سالم در نظر گرفته نمی‌شود.</caption><thead><tr><th scope="col">ربات</th><th scope="col">وضعیت</th><th scope="col">باتری</th><th scope="col">آخرین گزارش</th></tr></thead><tbody id="robotRows"><tr><td colspan="4" class="empty">در انتظار داده</td></tr></tbody></table></div></section>
     </div>
     <section class="card missions" id="missions" aria-labelledby="missionsTitle"><div class="card-head"><div><h2 id="missionsTitle">مأموریت‌های اخیر</h2><p class="muted">۱۰ رکورد اخیر؛ جست‌وجو و فیلتر فقط روی همین رکوردها اعمال می‌شود.</p></div><button class="button primary" id="newMission" disabled>مأموریت جدید</button></div>
       <div class="filters"><label for="missionSearch">جست‌وجو<input id="missionSearch" type="search" placeholder="شناسه، مبدأ، مقصد یا ربات"></label><label for="statusFilter">وضعیت<select id="statusFilter"><option value="">همه وضعیت‌ها</option><option value="waiting">در صف</option><option value="running">در حال اجرا</option><option value="done">تکمیل شده</option><option value="cancelled">لغو شده</option></select></label></div>
@@ -56,7 +56,8 @@
   const number = new Intl.NumberFormat('fa-IR');
   const statusLabels = {done:'تکمیل شده',running:'در حال اجرا',waiting:'در صف',cancelled:'لغو شده'};
   const robotLabels = {moving:'در حرکت',waiting:'آماده',charging:'در حال شارژ',offline:'آفلاین'};
-  const actionErrors = {robot_offline:'ربات انتخاب‌شده آفلاین است.',robot_not_found:'ربات پیدا نشد.',mission_not_assignable:'وضعیت مأموریت تغییر کرده؛ دوباره به‌روزرسانی کنید.',only_waiting_missions_can_be_cancelled:'فقط مأموریت در صف قابل لغو است.',mission_not_found:'مأموریت پیدا نشد.',origin_and_destination_are_required:'مبدأ و مقصد را وارد کنید.'};
+  const actionErrors = {robot_offline:'ربات انتخاب‌شده آفلاین یا بدون گزارش تازه است.',robot_not_found:'ربات پیدا نشد.',mission_not_assignable:'وضعیت مأموریت تغییر کرده؛ دوباره به‌روزرسانی کنید.',only_waiting_missions_can_be_cancelled:'فقط مأموریت در صف قابل لغو است.',mission_not_found:'مأموریت پیدا نشد.',origin_and_destination_are_required:'مبدأ و مقصد را وارد کنید.'};
+  const alertLabels = {low_battery:'باتری کم',robot_offline:'بدون گزارش تازه',mission_waiting:'مأموریت در صف',emergency_stop:'توقف اضطراری',protective_field:'ورود به میدان حفاظتی'};
   let latestRobots = [], latestMissions = [], connected = false, refreshing = null, submitting = false, action = 'create', selectedId = '', lastSuccess = null, dialogTrigger = null, toastTimer;
   function escapeHtml(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function notify(message) { clearTimeout(toastTimer); $('toast').textContent = message; toastTimer = setTimeout(() => { $('toast').textContent = ''; }, 5000); }
@@ -79,12 +80,15 @@
     $('missionRows').innerHTML = items.map(m => `<tr><td><bdi>${escapeHtml(m.id)}</bdi></td><td>${escapeHtml(m.origin)}</td><td>${escapeHtml(m.destination)}</td><td><bdi>${escapeHtml(m.robot)}</bdi></td><td class="${Object.hasOwn(statusLabels,m.status) ? m.status : ''}">${statusLabels[m.status] || 'نامشخص'}</td><td>${escapeHtml(formatTime(m.started_at))}</td><td>${missionActions(m)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">مأموریتی برای نمایش وجود ندارد.</td></tr>';
   }
   function renderRobots() {
-    $('robotRows').innerHTML = latestRobots.map(r => `<tr><td><bdi>${escapeHtml(r.id)}</bdi></td><td>${robotLabels[r.status] || 'نامشخص'}</td><td>${number.format(r.battery)}٪</td><td>${escapeHtml(formatTime(r.updated_at))}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">رباتی ثبت نشده است.</td></tr>';
+    $('robotRows').innerHTML = latestRobots.map(r => {
+      const state = r.stale ? `${robotLabels.offline} <span class="muted">(آخرین وضعیت گزارش‌شده: ${robotLabels[r.reported_status] || 'نامشخص'})</span>` : (robotLabels[r.status] || 'نامشخص');
+      return `<tr><td><bdi>${escapeHtml(r.id)}</bdi></td><td>${state}</td><td>${number.format(r.battery)}٪</td><td>${escapeHtml(formatTime(r.updated_at))}</td></tr>`;
+    }).join('') || '<tr><td colspan="4" class="empty">رباتی ثبت نشده است.</td></tr>';
     $('robotLayer').replaceChildren();
     latestRobots.forEach(robot => {
       const marker = document.createElement('span');
       marker.className = `robot ${Object.hasOwn(robotLabels,robot.status) ? robot.status : 'offline'}`;
-      marker.textContent = robot.id;
+      marker.textContent = robot.e_stop && robot.e_stop !== 'NONE' ? '⏹' : robot.id;
       marker.style.right = `${Math.max(0,Math.min(100,Number(robot.position.x) || 0))}%`;
       marker.style.top = `${Math.max(0,Math.min(100,Number(robot.position.y) || 0))}%`;
       marker.title = `${robot.id} · ${robotLabels[robot.status] || 'نامشخص'} · ${number.format(robot.battery)}٪`;
@@ -96,7 +100,7 @@
     $('alertCount').textContent = alerts.length ? `${number.format(alerts.length)} مورد` : '';
     $('alertList').innerHTML = alerts.map(alert => {
       const subject = alert.robot || alert.mission || '—';
-      const label = {low_battery:'باتری کم',robot_offline:'ربات آفلاین',mission_waiting:'مأموریت در صف'}[alert.type] || 'هشدار عملیاتی';
+      const label = alertLabels[alert.type] || 'هشدار عملیاتی';
       return `<p class="${alert.severity === 'critical' ? 'error' : 'muted'}"><bdi>${escapeHtml(subject)}</bdi> — ${label}</p>`;
     }).join('');
   }
@@ -125,7 +129,7 @@
         $('activeMissions').textContent = number.format(data.missions.active);
         $('averageBattery').textContent = data.fleet.total ? `${number.format(data.fleet.average_battery)}٪` : '—';
         lastSuccess = new Date();
-        $('connectionStatus').textContent = 'API محلی متصل است؛ داده‌ها شامل رکوردهای نمونه هستند و اتصال ربات واقعی تأیید نشده است.';
+        $('connectionStatus').textContent = 'API محلی متصل است؛ داده‌ها شامل رکوردهای نمونه هستند و پل VDA 5050 فقط ورودی می‌پذیرد — فرمانی به ربات ارسال نمی‌شود.';
         $('lastUpdated').textContent = `آخرین دریافت: ${lastSuccess.toLocaleString('fa-IR', {timeZone:'Asia/Tehran'})} (تهران) · به‌روزرسانی هر ۱۵ ثانیه`;
         renderRobots();
         renderAlerts(alertData.alerts);

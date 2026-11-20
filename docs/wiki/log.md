@@ -6,3 +6,4 @@
 ## [2026-11-05] update | API نقشه و مسیر، metadata مأموریت، تاریخچه telemetry، هشدارها، گزارش‌ها و webhook امضاشدهٔ WMS اضافه شد.
 ## [2026-11-10] update | بسته‌بندی Docker غیر root با volume SQLite، healthcheck و build gate در CI اضافه شد؛ مستندات اجرا و معماری به‌روز شد.
 ## [2026-11-16] update | docker compose برای app و لندینگ، پروفایل اختیاری TimescaleDB/EMQX/Keycloak، envهای host/port و اسموک‌تست کانتینر در CI اضافه شد.
+## [2026-11-20] update | آداپتور VDA 5050 و پل ورودی state/connection، آفلاین مشتق‌شده از heartbeat، هشدار توقف اضطراری و میدان حفاظتی، و ۱۰ تست جدید اضافه شد؛ ارسال order خروجی هنوز وصل نیست.

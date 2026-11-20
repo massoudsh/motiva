@@ -11,7 +11,7 @@ Accepted for the MVP; production broker and TimescaleDB validation remain a depl
 - **Backend:** Python with FastAPI-compatible contracts; the current prototype remains dependency-light while the service boundary is established.
 - **Frontend:** React-compatible browser client; the current RTL client is retained until the service migration is scheduled.
 - **Database:** PostgreSQL with TimescaleDB for telemetry; SQLite remains the local prototype store.
-- **Robot transport:** MQTT/EMQX for device telemetry.
+- **Robot transport:** MQTT/EMQX for device telemetry, with **VDA 5050** as the message contract to vehicles because it is the vendor-neutral interface for mixed fleets.
 - **UI realtime:** WebSocket, with HTTP endpoints for queries and commands.
 - **Identity:** Keycloak for user identity and role claims; robot credentials are separate from user credentials.
 - **Deployment:** Docker Compose for the MVP and an explicit migration path to Kubernetes in phase 2.
@@ -27,6 +27,8 @@ The 50-robot simulation used an in-process queue and SQLite WAL because EMQX and
 ## Consequences
 
 The MVP must keep latest robot state separate from raw telemetry, batch writes, coalesce UI updates, and define retention before production ingestion. Re-run the spike against EMQX and TimescaleDB before pilot deployment; the current prototype numbers do not validate broker or database performance.
+
+Adopting VDA 5050 standardises only the message contract. It defines no traffic coordination, routing, functional safety, charging curves or load handling, so the fleet manager must still supply those; the standard alone does not make a mixed fleet coexist on the floor.
 
 ## Related concepts
 

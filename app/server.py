@@ -7,16 +7,20 @@ import json
 import os
 import re
 import sqlite3
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+import vda5050
 from navigation import shortest_path
 from integration import decode_event, valid_signature
 
 HOST = os.environ.get("MOTIVA_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MOTIVA_PORT", "8787"))
 DB_PATH = Path(os.environ.get("MOTIVA_DB_PATH", Path(__file__).with_name("motiva.sqlite3")))
+HEARTBEAT_TIMEOUT_SECONDS = float(os.environ.get("MOTIVA_HEARTBEAT_TIMEOUT_SECONDS", "30"))
+MAP_EXTENT_METRES = float(os.environ.get("MOTIVA_MAP_EXTENT_METRES", "100"))
 UNASSIGNED_ROBOT = "تخصیص خودکار"
 MISSION_COLUMNS = "id, origin, destination, robot, status, started_at"
 ROBOT_STATUSES = {"moving", "waiting", "charging", "offline"}
@@ -71,6 +75,17 @@ def initialize_db() -> None:
             id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('moving', 'waiting', 'charging', 'offline')),
             battery INTEGER NOT NULL CHECK(battery BETWEEN 0 AND 100), x INTEGER NOT NULL,
             y INTEGER NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        # Added later: heartbeat_at drives derived offline state, the rest carry
+        # the VDA 5050 safety and order context the dashboard surfaces.
+        existing = {row["name"] for row in db.execute("PRAGMA table_info(robots)")}
+        for column, definition in (
+            ("heartbeat_at", "REAL"),
+            ("order_id", "TEXT"),
+            ("e_stop", "TEXT NOT NULL DEFAULT 'NONE'"),
+            ("field_violation", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if column not in existing:
+                db.execute(f"ALTER TABLE robots ADD COLUMN {column} {definition}")
         db.execute("""CREATE TABLE IF NOT EXISTS map_nodes (
             id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('zone', 'station')),
             name TEXT NOT NULL)""")
@@ -85,7 +100,12 @@ def initialize_db() -> None:
             db.executemany("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", SEED_MISSIONS)
         db.execute("INSERT OR IGNORE INTO mission_details(mission_id) SELECT id FROM missions")
         if not db.execute("SELECT 1 FROM robots LIMIT 1").fetchone():
-            db.executemany("INSERT INTO robots(id, status, battery, x, y) VALUES (?, ?, ?, ?, ?)", SEED_ROBOTS)
+            # Seeded robots get a current heartbeat so a fresh install renders as
+            # online demo data that ages into offline exactly like real robots.
+            db.executemany(
+                "INSERT INTO robots(id, status, battery, x, y, heartbeat_at) VALUES (?, ?, ?, ?, ?, ?)",
+                ((*robot, time.time()) for robot in SEED_ROBOTS),
+            )
 
 
 def mission_payload(row: sqlite3.Row) -> dict[str, Any]:
@@ -107,8 +127,31 @@ def mission_payload(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def robot_payload(row: sqlite3.Row) -> dict[str, Any]:
-    return {"id": row["id"], "status": row["status"], "battery": row["battery"], "position": {"x": row["x"], "y": row["y"]}, "updated_at": row["updated_at"]}
+def robot_payload(row: sqlite3.Row, now: float | None = None) -> dict[str, Any]:
+    heartbeat = row["heartbeat_at"] if "heartbeat_at" in row.keys() else None
+    stale = is_stale(heartbeat, now)
+    status = "offline" if stale else row["status"]
+    return {
+        "id": row["id"],
+        "status": status,
+        "reported_status": row["status"],
+        "stale": stale,
+        "battery": row["battery"],
+        "position": {"x": row["x"], "y": row["y"]},
+        "updated_at": row["updated_at"],
+        "heartbeat_at": heartbeat,
+        "order_id": row["order_id"] if "order_id" in row.keys() else None,
+        "e_stop": row["e_stop"] if "e_stop" in row.keys() else "NONE",
+        "field_violation": bool(row["field_violation"]) if "field_violation" in row.keys() else False,
+    }
+
+
+def is_stale(heartbeat: float | None, now: float | None = None) -> bool:
+    """A robot with no heartbeat or an old one is never treated as healthy."""
+    if heartbeat is None:
+        return True
+    current = time.time() if now is None else now
+    return current - heartbeat > HEARTBEAT_TIMEOUT_SECONDS
 
 
 def response_payload() -> dict[str, Any]:
@@ -116,13 +159,16 @@ def response_payload() -> dict[str, Any]:
         missions = db.execute("SELECT * FROM missions ORDER BY id DESC LIMIT 10").fetchall()
         robots = db.execute("SELECT * FROM robots ORDER BY id").fetchall()
         active = db.execute("SELECT COUNT(*) FROM missions WHERE status IN ('running', 'waiting')").fetchone()[0]
-    online = sum(row["status"] != "offline" for row in robots)
-    average_battery = round(sum(row["battery"] for row in robots) / len(robots)) if robots else 0
+    now = time.time()
+    payloads = [robot_payload(row, now) for row in robots]
+    online = sum(not item["stale"] for item in payloads)
+    average_battery = round(sum(item["battery"] for item in payloads) / len(payloads)) if payloads else 0
     return {
-        "fleet": {"online": online, "total": len(robots), "utilization": None, "average_battery": average_battery},
-        "robots": [robot_payload(row) for row in robots],
+        "fleet": {"online": online, "total": len(payloads), "utilization": None, "average_battery": average_battery},
+        "robots": payloads,
         "missions": {"active": active, "cycle_minutes": None, "items": [mission_payload(row) for row in missions]},
         "system": {"core": None, "wms": None, "status": "prototype"},
+        "heartbeat_timeout_seconds": HEARTBEAT_TIMEOUT_SECONDS,
     }
 
 
@@ -187,6 +233,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/integrations/events":
             self.receive_integration_event(payload)
             return
+        if path == "/api/integrations/vda5050":
+            self.receive_vda5050(payload)
+            return
         if path == "/api/map/nodes":
             self.add_map_node(payload)
             return
@@ -212,6 +261,70 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, {"error": "route_not_found"})
 
+    def receive_vda5050(self, payload: Any) -> None:
+        """Inbound half of the VDA 5050 bridge.
+
+        A gateway subscribed to ``state/{agv_id}`` and ``connection/{agv_id}``
+        forwards messages here. Publishing orders back out is not wired yet, so
+        this endpoint never claims a command reached a robot.
+        """
+        if not isinstance(payload, dict):
+            self._send(422, {"error": "invalid_vda_message"})
+            return
+        agv_id = payload.get("agv_id")
+        message_type = payload.get("message_type")
+        body = payload.get("payload")
+        if not isinstance(agv_id, str) or not agv_id.strip():
+            self._send(422, {"error": "agv_id_is_required"})
+            return
+        if message_type not in {"state", "connection"}:
+            self._send(422, {"error": "unsupported_message_type"})
+            return
+
+        if message_type == "connection":
+            online = vda5050.connection_is_online(body)
+            if online is None:
+                self._send(422, {"error": "invalid_connection_message"})
+                return
+            with connection() as db:
+                exists = db.execute("SELECT 1 FROM robots WHERE id = ?", (agv_id.strip(),)).fetchone()
+                if not exists:
+                    self._send(404, {"error": "robot_not_found"})
+                    return
+                # An explicit OFFLINE drops the heartbeat so the robot reads as
+                # offline immediately instead of waiting for the timeout.
+                if online:
+                    db.execute("UPDATE robots SET heartbeat_at = ? WHERE id = ?", (time.time(), agv_id.strip()))
+                else:
+                    db.execute("UPDATE robots SET heartbeat_at = NULL WHERE id = ?", (agv_id.strip(),))
+            self._send(200, {"accepted": True, "agv_id": agv_id.strip(), "online": online})
+            return
+
+        telemetry = vda5050.state_to_telemetry(body, MAP_EXTENT_METRES)
+        if telemetry is None:
+            self._send(422, {"error": "invalid_state_message"})
+            return
+        with connection() as db:
+            exists = db.execute("SELECT 1 FROM robots WHERE id = ?", (agv_id.strip(),)).fetchone()
+            if not exists:
+                self._send(404, {"error": "robot_not_found"})
+                return
+            db.execute(
+                """UPDATE robots SET status = ?, battery = ?, x = ?, y = ?, order_id = ?,
+                   e_stop = ?, field_violation = ?, updated_at = CURRENT_TIMESTAMP, heartbeat_at = ?
+                   WHERE id = ?""",
+                (
+                    telemetry["status"], telemetry["battery"], telemetry["position"]["x"],
+                    telemetry["position"]["y"], telemetry["order_id"], telemetry["e_stop"],
+                    int(telemetry["field_violation"]), time.time(), agv_id.strip(),
+                ),
+            )
+            db.execute(
+                "INSERT INTO telemetry_history(robot_id, status, battery, x, y) VALUES (?, ?, ?, ?, ?)",
+                (agv_id.strip(), telemetry["status"], telemetry["battery"], telemetry["position"]["x"], telemetry["position"]["y"]),
+            )
+        self._send(200, {"accepted": True, "agv_id": agv_id.strip(), "telemetry": telemetry})
+
     def receive_integration_event(self, payload: Any) -> None:
         secret = os.environ.get("MOTIVA_WEBHOOK_SECRET")
         if not secret:
@@ -234,10 +347,21 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"accepted": True, "duplicate": not bool(inserted)})
 
     def get_alerts(self) -> None:
+        now = time.time()
         with connection() as db:
-            robots = db.execute("SELECT id, status, battery FROM robots WHERE status = 'offline' OR battery <= 20 ORDER BY id").fetchall()
+            rows = db.execute("SELECT * FROM robots ORDER BY id").fetchall()
             missions = db.execute("SELECT id, origin, destination FROM missions WHERE status = 'waiting' ORDER BY id").fetchall()
-        alerts = [{"type": "robot_offline" if row["status"] == "offline" else "low_battery", "severity": "critical" if row["status"] == "offline" else "warning", "robot": row["id"], "battery": row["battery"]} for row in robots]
+        alerts = []
+        for row in rows:
+            robot = robot_payload(row, now)
+            if robot["stale"]:
+                alerts.append({"type": "robot_offline", "severity": "critical", "robot": robot["id"], "battery": robot["battery"]})
+            elif robot["battery"] <= 20:
+                alerts.append({"type": "low_battery", "severity": "warning", "robot": robot["id"], "battery": robot["battery"]})
+            if robot["e_stop"] != "NONE":
+                alerts.append({"type": "emergency_stop", "severity": "critical", "robot": robot["id"], "e_stop": robot["e_stop"]})
+            if robot["field_violation"]:
+                alerts.append({"type": "protective_field", "severity": "warning", "robot": robot["id"]})
         alerts.extend({"type": "mission_waiting", "severity": "info", "mission": f"M-{row['id']}", "origin": row["origin"], "destination": row["destination"]} for row in missions)
         self._send(200, {"alerts": alerts})
 
@@ -337,7 +461,7 @@ class Handler(BaseHTTPRequestHandler):
             if robot is None:
                 self._send(422, {"error": "robot_not_found"})
                 return
-            if robot["status"] == "offline":
+            if robot_payload(robot)["status"] == "offline":
                 self._send(409, {"error": "robot_offline"})
                 return
             if mission["status"] not in {"waiting", "cancelled"}:
@@ -375,7 +499,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(422, {"error": "invalid_telemetry"})
             return
         with connection() as db:
-            cursor = db.execute("UPDATE robots SET status = ?, battery = ?, x = ?, y = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (status, battery, position["x"], position["y"], payload["id"]))
+            cursor = db.execute(
+                "UPDATE robots SET status = ?, battery = ?, x = ?, y = ?, updated_at = CURRENT_TIMESTAMP, heartbeat_at = ? WHERE id = ?",
+                (status, battery, position["x"], position["y"], time.time(), payload["id"]),
+            )
             if cursor.rowcount:
                 db.execute("INSERT INTO telemetry_history(robot_id, status, battery, x, y) VALUES (?, ?, ?, ?, ?)", (payload["id"], status, battery, position["x"], position["y"]))
             row = db.execute("SELECT * FROM robots WHERE id = ?", (payload["id"],)).fetchone()

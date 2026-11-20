@@ -112,6 +112,20 @@ docker compose down -v          # remove containers and data volumes
 
 The SQLite database lives in the `motiva-data` volume at `/data/motiva.sqlite3`. The app listens on `0.0.0.0:8787` inside the container and runs as a non-root user. `POST /api/integrations/events` returns `503` until `MOTIVA_WEBHOOK_SECRET` is set.
 
+## Robot telemetry (VDA 5050)
+
+`app/vda5050.py` translates VDA 5050 state and connection messages. An MQTT gateway subscribed to `state/{agv_id}` and `connection/{agv_id}` forwards them to:
+
+```bash
+curl -X POST http://localhost:8787/api/integrations/vda5050 \
+  -H 'Content-Type: application/json' \
+  -d '{"agv_id":"R-07","message_type":"state","payload":{"batteryState":{"batteryCharge":62},"agvPosition":{"x":30,"y":40,"positionInitialized":true},"orderId":""}}'
+```
+
+A robot counts as offline once its last heartbeat is older than `MOTIVA_HEARTBEAT_TIMEOUT_SECONDS` (default 30), and a stale robot can't be assigned missions. Vehicle coordinates are metres on the robot's own map, scaled to `MOTIVA_MAP_EXTENT_METRES` for the dashboard grid.
+
+**Not wired:** nothing publishes orders back to `order/{agv_id}`. `order_message()` builds a valid VDA order, but no command reaches a robot yet. VDA 5050 also defines no traffic coordination, routing or functional safety — those stay fleet-manager work.
+
 ## معماری و توسعه
 
 - [معماری فنی](./ARCHITECTURE.md)
