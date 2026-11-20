@@ -320,5 +320,110 @@ class DispatchEndpointTests(OperationsFixture):
                 self.assertEqual(self.post('/api/map/nodes', {'id': 'A', 'kind': 'station', 'name': 'A', **payload})[0], 422)
 
 
+class TrafficEndpointTests(OperationsFixture):
+    def build(self):
+        for node in ({'id': 'A', 'x': 10, 'y': 10}, {'id': 'B', 'x': 30, 'y': 10},
+                     {'id': 'C', 'x': 50, 'y': 10}, {'id': 'D', 'x': 30, 'y': 40}):
+            self.assertEqual(self.post('/api/map/nodes', {'kind': 'station', 'name': node['id'], **node})[0], 201)
+        for edge in ({'source': 'A', 'target': 'B'}, {'source': 'B', 'target': 'C'},
+                     {'source': 'A', 'target': 'D'}, {'source': 'D', 'target': 'C'}):
+            self.assertEqual(self.post('/api/map/edges', edge)[0], 201)
+
+    def route(self, **payload):
+        return self.post('/api/map/route', payload)
+
+    def test_route_without_traffic_keeps_the_existing_response_shape(self):
+        self.build()
+        status, data = self.route(start='A', goal='C')
+        self.assertEqual(status, 200)
+        self.assertEqual(data['path'], ['A', 'B', 'C'])
+        self.assertFalse(data['traffic']['traffic_applied'])
+
+    def test_reserve_requires_a_robot(self):
+        self.build()
+        self.assertEqual(self.route(start='A', goal='C', reserve=True)[0], 422)
+
+    def test_reserved_route_forces_the_second_robot_to_avoid_the_corridor(self):
+        self.build()
+        status, first = self.route(start='A', goal='C', robot='R-01', reserve=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(first['path'], ['A', 'B', 'C'])
+        # Stations are shared; only the corridor between them is leased.
+        self.assertEqual(first['leased_nodes'], ['B'])
+
+        status, second = self.route(start='A', goal='C', robot='R-04', reserve=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(second['path'], ['A', 'D', 'C'])
+        self.assertTrue(second['traffic']['traffic_applied'])
+        self.assertEqual(second['traffic']['reserved_by']['B'], 'R-01')
+
+    def test_a_robot_is_not_blocked_by_its_own_reservation(self):
+        self.build()
+        self.assertEqual(self.route(start='A', goal='C', robot='R-01', reserve=True)[0], 200)
+        status, again = self.route(start='A', goal='C', robot='R-01', reserve=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(again['path'], ['A', 'B', 'C'])
+
+    def test_traffic_blocked_route_reports_the_reason(self):
+        self.build()
+        # A-D-C is cut, so B is the only corridor between A and C.
+        self.post('/api/map/obstacles', {'node_id': 'D', 'active': True})
+        self.assertEqual(self.route(start='A', goal='C', robot='R-01', reserve=True)[0], 200)
+        status, data = self.route(start='A', goal='C', robot='R-04')
+        self.assertEqual(status, 409)
+        self.assertEqual(data['error'], 'blocked_by_traffic')
+        self.assertEqual(data['traffic']['reserved_by'], {'B': 'R-01'})
+
+    def test_map_exposes_active_reservations_and_conflicts(self):
+        self.build()
+        self.route(start='A', goal='C', robot='R-01', reserve=True)
+        status, data = self.get('/api/map')
+        self.assertEqual(status, 200)
+        self.assertEqual({r['node_id'] for r in data['reservations']}, {'B'})
+        self.assertEqual(data['conflicts'], [])
+
+    def test_mission_assignment_leases_the_corridor_and_cancel_releases_it(self):
+        self.build()
+        created = self.post('/api/missions', {'origin': 'A', 'destination': 'C'})[1]
+        mission_id = created['mission']['id'][2:]
+        status, data = self.post(f'/api/missions/{mission_id}/assign', {'robot': 'R-01'})
+        self.assertEqual(status, 200)
+        # Only the transit node is exclusive; the shared stations are not.
+        self.assertEqual(data['traffic']['leased_nodes'], ['B'])
+
+        _, map_data = self.get('/api/map')
+        self.assertEqual({r['node_id'] for r in map_data['reservations']}, {'B'})
+
+        # A second mission through the same corridor is detoured, not refused.
+        second = self.post('/api/missions', {'origin': 'A', 'destination': 'C'})[1]
+        second_id = second['mission']['id'][2:]
+        _, assigned = self.post(f'/api/missions/{second_id}/assign', {'robot': 'R-04'})
+        self.assertTrue(assigned['traffic']['traffic_applied'])
+        self.assertEqual(assigned['traffic']['leased_nodes'], ['D'])
+
+        # Cancelling a waiting mission releases its lease and reports it.
+        pending = self.post('/api/missions', {'origin': 'A', 'destination': 'D'})[1]
+        cancel_id = pending['mission']['id'][2:]
+        self.assertEqual(self.post(f'/api/missions/{cancel_id}/cancel', {})[0], 200)
+        status, cancelled = self.post(f'/api/missions/{cancel_id}/cancel', {})
+        self.assertEqual(status, 409)
+
+    def test_mission_with_free_text_endpoints_is_reported_as_unrouted(self):
+        created = self.post('/api/missions', {'origin': 'Loading dock', 'destination': 'Line A'})[1]
+        status, data = self.post(f"/api/missions/{created['mission']['id'][2:]}/assign", {'robot': 'R-01'})
+        self.assertEqual(status, 200)
+        self.assertEqual(data['traffic']['status'], 'unrouted')
+        self.assertEqual(data['traffic']['leased_nodes'], [])
+
+    def test_expired_lease_frees_the_corridor(self):
+        self.build()
+        self.route(start='A', goal='C', robot='R-01', reserve=True)
+        with sqlite3.connect(server.DB_PATH) as db:
+            db.execute('UPDATE node_reservations SET held_until = ?', (time.time() - 1,))
+        status, data = self.route(start='A', goal='C', robot='R-04')
+        self.assertEqual(status, 200)
+        self.assertFalse(data['traffic']['traffic_applied'])
+
+
 if __name__ == '__main__':
     unittest.main()

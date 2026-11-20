@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import dispatch
+import traffic
 import vda5050
 from navigation import shortest_path
 from integration import decode_event, valid_signature
@@ -103,6 +104,12 @@ def initialize_db() -> None:
             FOREIGN KEY(source) REFERENCES map_nodes(id), FOREIGN KEY(target) REFERENCES map_nodes(id))""")
         db.execute("""CREATE TABLE IF NOT EXISTS map_obstacles (
             node_id TEXT PRIMARY KEY, active INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY(node_id) REFERENCES map_nodes(id))""")
+        # One holder per node is enforced by the database, not just by code, so a
+        # racing dispatcher cannot lease the same corridor twice.
+        db.execute("""CREATE TABLE IF NOT EXISTS node_reservations (
+            node_id TEXT PRIMARY KEY, robot_id TEXT NOT NULL, mission_id INTEGER,
+            held_until REAL NOT NULL, acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(node_id) REFERENCES map_nodes(id))""")
         if not db.execute("SELECT 1 FROM missions LIMIT 1").fetchone():
             db.executemany("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", SEED_MISSIONS)
@@ -198,6 +205,97 @@ def origin_position(db: sqlite3.Connection, origin: str) -> dict[str, int] | Non
     if row is None:
         return None
     return {"x": row["x"], "y": row["y"]}
+
+
+def read_reservations(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [
+        {
+            "node_id": row["node_id"],
+            "robot_id": row["robot_id"],
+            "mission_id": row["mission_id"],
+            "held_until": row["held_until"],
+        }
+        for row in db.execute("SELECT * FROM node_reservations")
+    ]
+
+
+def claim_reservations(db: sqlite3.Connection, leases: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
+    """Insert leases inside the open transaction, refusing anything already held.
+
+    Expired rows are cleared first so a dead lease cannot wedge a corridor. Every
+    row must be inserted, otherwise the caller rolls back and the whole lease is
+    refused rather than half of it.
+    """
+    db.execute("DELETE FROM node_reservations WHERE held_until <= ?", (now,))
+    held = {row["node_id"]: row["robot_id"] for row in db.execute("SELECT node_id, robot_id FROM node_reservations")}
+    for lease in leases:
+        holder = held.get(lease["node_id"])
+        if holder is not None and holder != lease["robot_id"]:
+            return [{"node_id": lease["node_id"], "robot_id": holder}]
+    db.executemany(
+        "INSERT INTO node_reservations(node_id, robot_id, mission_id, held_until) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(node_id) DO UPDATE SET robot_id = excluded.robot_id, "
+        "mission_id = excluded.mission_id, held_until = excluded.held_until",
+        [(lease["node_id"], lease["robot_id"], lease["mission_id"], lease["held_until"]) for lease in leases],
+    )
+    return []
+
+
+def release_reservations(db: sqlite3.Connection, *, robot_id: str | None = None, mission_id: int | None = None) -> int:
+    """Drop leases for a finished/cancelled mission or a parked robot."""
+    if robot_id is not None:
+        return db.execute("DELETE FROM node_reservations WHERE robot_id = ?", (robot_id,)).rowcount
+    if mission_id is not None:
+        return db.execute("DELETE FROM node_reservations WHERE mission_id = ?", (mission_id,)).rowcount
+    return 0
+
+
+def route_between(db: sqlite3.Connection, start: str, goal: str, *, robot_id: str | None = None, now: float | None = None) -> dict[str, Any]:
+    edges = db.execute("SELECT source, target FROM map_edges").fetchall()
+    blocked = [row[0] for row in db.execute("SELECT node_id FROM map_obstacles WHERE active = 1")]
+    return traffic.plan_route(
+        ((row["source"], row["target"]) for row in edges),
+        start,
+        goal,
+        blocked=blocked,
+        reservations=read_reservations(db),
+        robot_id=robot_id,
+        now=time.time() if now is None else now,
+    )
+
+
+def lease_mission_route(
+    db: sqlite3.Connection, mission_id: int, robot_id: str, origin: str, destination: str, now: float,
+) -> dict[str, Any] | None:
+    """Plan and lease the route for a newly assigned mission.
+
+    Returns None when the mission names no located endpoints: there is no route
+    to coordinate, so claiming traffic management would be a lie.
+    """
+    resolved = origin_position(db, origin)
+    if resolved is None:
+        return {"status": "unrouted", "reason": "origin_not_a_placed_node", "leased_nodes": []}
+    if origin_position(db, destination) is None:
+        return {"status": "unrouted", "reason": "destination_not_a_placed_node", "leased_nodes": []}
+
+    result = route_between(db, origin.strip(), destination.strip(), robot_id=robot_id, now=now)
+    if not result["path"]:
+        return {"status": result["status"], "reason": "no_route_for_mission", "leased_nodes": [], "traffic_applied": result["traffic_applied"]}
+
+    leases = traffic.lease_path(result["path"], robot_id=robot_id, mission_id=mission_id, now=now)
+    conflicts = claim_reservations(db, leases, now)
+    if conflicts:
+        return {
+            "status": "lease_conflict",
+            "conflicts": conflicts,
+            "leased_nodes": [],
+            "traffic_applied": result["traffic_applied"],
+        }
+    return {
+        "status": result["status"],
+        "leased_nodes": [lease["node_id"] for lease in leases],
+        "traffic_applied": result["traffic_applied"],
+    }
 
 
 def dispatch_preview(mission_row: sqlite3.Row | None = None, origin: str | None = None) -> dict[str, Any]:
@@ -437,11 +535,19 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"period": "all", "missions": {"total": totals["total"], "completed": totals["completed"] or 0, "active": totals["active"] or 0}, "fleet": {"total": total_robots, "online": robots["online"] or 0, "utilization": round((robots["online"] or 0) / total_robots * 100) if total_robots else 0}, "telemetry_samples": telemetry})
 
     def get_map(self) -> None:
+        now = time.time()
         with connection() as db:
             nodes = [dict(row) for row in db.execute("SELECT * FROM map_nodes ORDER BY id")]
             edges = [dict(row) for row in db.execute("SELECT source, target FROM map_edges ORDER BY source, target")]
             obstacles = [row[0] for row in db.execute("SELECT node_id FROM map_obstacles WHERE active = 1")]
-        self._send(200, {"nodes": nodes, "edges": edges, "obstacles": obstacles})
+            reservations = traffic.active_reservations(read_reservations(db), now)
+        self._send(200, {
+            "nodes": nodes,
+            "edges": edges,
+            "obstacles": obstacles,
+            "reservations": reservations,
+            "conflicts": traffic.find_conflicts(reservations, now),
+        })
 
     def add_map_node(self, payload: Any) -> None:
         if not isinstance(payload, dict) or not isinstance(payload.get("id"), str) or not payload["id"].strip() or payload.get("kind") not in {"zone", "station"} or not isinstance(payload.get("name"), str) or not payload["name"].strip():
@@ -508,14 +614,35 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict) or not all(isinstance(payload.get(key), str) and payload[key].strip() for key in ("start", "goal")):
             self._send(422, {"error": "route_endpoints_are_required"})
             return
-        with connection() as db:
-            edges = db.execute("SELECT source, target FROM map_edges").fetchall()
-            blocked = [row[0] for row in db.execute("SELECT node_id FROM map_obstacles WHERE active = 1")]
-        path = shortest_path(((row["source"], row["target"]) for row in edges), payload["start"], payload["goal"], blocked)
-        if not path:
-            self._send(409, {"error": "route_not_found"})
+        robot_id = payload.get("robot").strip() if isinstance(payload.get("robot"), str) else None
+        reserve = payload.get("reserve") is True
+        if reserve and not robot_id:
+            self._send(422, {"error": "reserve_requires_robot"})
             return
-        self._send(200, {"path": path})
+
+        now = time.time()
+        conflicts: list[dict[str, Any]] = []
+        leased: list[str] = []
+        with connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            result = route_between(db, payload["start"], payload["goal"], robot_id=robot_id, now=now)
+            if result["path"] and reserve:
+                leases = traffic.lease_path(result["path"], robot_id=robot_id, mission_id=None, now=now)
+                conflicts = claim_reservations(db, leases, now)
+                if not conflicts:
+                    leased = [lease["node_id"] for lease in leases]
+
+        if conflicts:
+            self._send(409, {"error": "traffic_conflict", "conflicts": conflicts})
+            return
+        if not result["path"]:
+            error = "blocked_by_traffic" if result["status"] == "blocked_by_traffic" else "route_not_found"
+            self._send(409, {"error": error, "traffic": result})
+            return
+        response: dict[str, Any] = {"path": result["path"], "traffic": result}
+        if leased:
+            response["leased_nodes"] = leased
+        self._send(200, response)
 
     def create_mission(self, payload: Any) -> None:
         required = ("origin", "destination")
@@ -569,9 +696,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             db.execute("UPDATE missions SET robot = ?, status = 'running', started_at = 'اکنون' WHERE id = ?", (robot["id"], mission_id))
             row = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
+            traffic_result = lease_mission_route(db, mission_id, robot["id"], mission["origin"], mission["destination"], time.time())
         response: dict[str, Any] = {"mission": mission_payload(row)}
         if dispatch_result is not None:
             response["dispatch"] = dispatch_result
+        if traffic_result is not None:
+            response["traffic"] = traffic_result
         self._send(200, response)
 
     @staticmethod
@@ -606,8 +736,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(409, {"error": "only_waiting_missions_can_be_cancelled"})
                 return
             db.execute("UPDATE missions SET status = 'cancelled' WHERE id = ?", (mission_id,))
+            released = release_reservations(db, mission_id=mission_id)
             row = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
-        self._send(200, {"mission": mission_payload(row)})
+        self._send(200, {"mission": mission_payload(row), "released_nodes": released})
 
     def update_telemetry(self, payload: Any) -> None:
         if not isinstance(payload, dict) or not isinstance(payload.get("id"), str):

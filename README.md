@@ -136,6 +136,20 @@ curl http://localhost:8787/api/missions/2046/dispatch
 
 `POST /api/missions/{id}/assign` with `{"auto": true}` performs the choice. Robots that are offline, charging, below 20% or unreported are excluded with a reason; the rest are scored on battery, workload and (when the origin names a placed map node) distance. Weights are renormalised when a signal is missing, and `distance_used` says plainly whether proximity was actually considered.
 
+## Traffic reservations
+
+`POST /api/map/route` can plan around other robots and lease the corridor it intends to use:
+
+```bash
+curl -X POST http://localhost:8787/api/map/route \
+  -H 'Content-Type: application/json' \
+  -d '{"start":"A","goal":"C","robot":"R-01","reserve":true}'
+```
+
+Only transit nodes are exclusive — a mission's start and goal are shared stations. If another robot holds the corridor, the response routes around it and reports `traffic_applied` with `reserved_by`; if nothing else is available it returns `409 blocked_by_traffic` rather than pretending the map is broken. Leases expire, one holder per node is enforced by the database, and `GET /api/map` lists active reservations.
+
+This is vertex-level, time-boxed reservation, not full traffic management: there is no deadlock-resolution loop and no per-segment time window.
+
 ## معماری و توسعه
 
 - [معماری فنی](./ARCHITECTURE.md)

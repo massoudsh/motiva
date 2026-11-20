@@ -50,6 +50,38 @@ so the UI never implies a proximity it did not compute. `GET
 the same serialised transaction, and returns the full explanation alongside the
 result.
 
+## Traffic coordination
+
+`app/traffic.py` reserves corridor nodes so two robots do not plan through the
+same space at once. VDA 5050 explicitly excludes traffic coordination, deadlock
+resolution and routing, so this is fleet-manager responsibility that the
+protocol does not provide.
+
+- **What is exclusive:** transit nodes only. A mission's start and goal are
+  stations that several robots may legitimately share (pick-up queues,
+  drop-off bays), so leasing them would make two trips through the same station
+  impossible.
+- **Leases expire.** Each lease carries `held_until`; there is no continuous
+  progress feed in the prototype to release nodes as a robot passes them, so a
+  bounded lease is the honest mechanism. Expired rows are cleared on the next
+  claim.
+- **One holder per node** is enforced by the primary key, not just by code, so a
+  racing claim cannot double-book a corridor. A robot re-claiming its own node
+  refreshes the lease rather than conflicting with itself.
+- **Routing reports why.** `plan_route` returns `clear`, `detoured`,
+  `blocked_by_traffic` or `no_route`, and a caller can distinguish a map that
+  has no path from a corridor another robot occupies.
+
+`POST /api/map/route` accepts `{"robot": "...", "reserve": true}` to plan and
+lease; `POST /api/missions/{id}/assign` leases the mission route automatically
+and reports `unrouted` when the endpoints are free text rather than placed
+nodes. Cancelling a waiting mission releases its leases.
+
+**Known limit:** leases are node-level and time-boxed, not time-windowed per
+segment. Two robots can still meet mid-corridor if a lease expires while one is
+still travelling, and there is no deadlock-resolution loop. Vertex reservations
+with a bounded lease are an honest first step, not full traffic management.
+
 ## Heartbeat and offline state
 
 A robot is offline when its last heartbeat is older than `MOTIVA_HEARTBEAT_TIMEOUT_SECONDS`, or when it has never reported. The stored `status` keeps what the robot last reported; the API exposes the derived `status` plus `reported_status`, `stale` and `heartbeat_at`. A stale robot is never counted as online, never raises a low-battery alert in place of an offline alert, and cannot be assigned a mission.

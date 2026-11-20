@@ -28,7 +28,7 @@ The 50-robot simulation used an in-process queue and SQLite WAL because EMQX and
 
 The MVP must keep latest robot state separate from raw telemetry, batch writes, coalesce UI updates, and define retention before production ingestion. Re-run the spike against EMQX and TimescaleDB before pilot deployment; the current prototype numbers do not validate broker or database performance.
 
-Adopting VDA 5050 standardises only the message contract. It defines no traffic coordination, routing, functional safety, charging curves or load handling, so the fleet manager must still supply those; the standard alone does not make a mixed fleet coexist on the floor.
+Adopting VDA 5050 standardises only the message contract. It defines no traffic coordination, routing, functional safety, charging curves or load handling, so the fleet manager must still supply those; the standard alone does not make a mixed fleet coexist on the floor. `app/traffic.py` is the first step of that gap: bounded vertex leases, not full deadlock-safe scheduling.
 
 ## Related concepts
 

@@ -70,11 +70,21 @@ class RoutePlanningTests(unittest.TestCase):
         self.assertEqual(by_traffic['path'], [])
 
     def test_permanent_obstacles_and_traffic_combine(self):
+        # `D` blocked leaves A-B-C-E as the only permanent route, so the lease on
+        # `B` is what finally severs it — the verdict must blame traffic, not the map.
         result = traffic.plan_route(
             EDGES, 'A', 'E', blocked={'D'}, reservations=[reservation('B', 'R-2', 200)],
             robot_id='R-1', now=100,
         )
-        self.assertEqual(result['status'], 'no_route')
+        self.assertEqual(result['status'], 'blocked_by_traffic')
+        self.assertEqual(result['path'], [])
+
+        # With no permanent route at all, traffic is not the reason.
+        no_map_route = traffic.plan_route(
+            EDGES, 'A', 'E', blocked={'B', 'D'}, reservations=[reservation('C', 'R-2', 200)],
+            robot_id='R-1', now=100,
+        )
+        self.assertEqual(no_map_route['status'], 'no_route')
 
     def test_endpoints_are_reachable_even_when_reserved(self):
         result = traffic.plan_route(
@@ -85,15 +95,23 @@ class RoutePlanningTests(unittest.TestCase):
 
 
 class LeaseTests(unittest.TestCase):
-    def test_lease_covers_the_leading_nodes_only(self):
+    def test_lease_covers_transit_nodes_only(self):
         leases = traffic.lease_path(['A', 'B', 'C', 'D', 'E'], robot_id='R-1', mission_id=7, now=100, depth=3, seconds=30)
-        self.assertEqual([lease['node_id'] for lease in leases], ['A', 'B', 'C'])
+        # A and E are stations, so only the corridor between them is leased.
+        self.assertEqual([lease['node_id'] for lease in leases], ['B', 'C', 'D'])
         self.assertTrue(all(lease['held_until'] == 130 for lease in leases))
         self.assertTrue(all(lease['robot_id'] == 'R-1' and lease['mission_id'] == 7 for lease in leases))
 
-    def test_lease_depth_is_bounded_by_path_length(self):
-        leases = traffic.lease_path(['A', 'B'], robot_id='R-1', mission_id=1, now=0, depth=10)
-        self.assertEqual(len(leases), 2)
+    def test_two_station_path_leases_nothing_because_endpoints_are_shared(self):
+        self.assertEqual(traffic.lease_path(['A', 'B'], robot_id='R-1', mission_id=1, now=0), [])
+
+    def test_endpoints_can_be_leased_explicitly(self):
+        leases = traffic.lease_path(['A', 'B', 'C'], robot_id='R-1', mission_id=1, now=0, include_endpoints=True)
+        self.assertEqual([lease['node_id'] for lease in leases], ['A', 'B', 'C'])
+
+    def test_lease_depth_is_bounded_by_transit_length(self):
+        leases = traffic.lease_path(['A', 'B', 'C', 'D'], robot_id='R-1', mission_id=1, now=0, depth=10)
+        self.assertEqual([lease['node_id'] for lease in leases], ['B', 'C'])
 
     def test_invalid_lease_inputs_produce_no_reservation(self):
         for kwargs in (
@@ -103,10 +121,10 @@ class LeaseTests(unittest.TestCase):
             {'robot_id': 'R-1', 'mission_id': 1, 'seconds': 0},
         ):
             with self.subTest(kwargs=kwargs):
-                self.assertEqual(traffic.lease_path(['A', 'B'], now=0, **kwargs), [])
+                self.assertEqual(traffic.lease_path(['A', 'B', 'C'], now=0, **kwargs), [])
         self.assertEqual(traffic.lease_path([], robot_id='R-1', mission_id=1, now=0), [])
 
-    def test_leased_nodes_are_then_seen_as_busy_by_another_robot(self):
+    def test_leased_corridor_forces_another_robot_to_detour(self):
         leases = traffic.lease_path(['A', 'B', 'C'], robot_id='R-1', mission_id=1, now=100, depth=2, seconds=60)
         result = traffic.plan_route(EDGES, 'A', 'C', reservations=leases, robot_id='R-2', now=120)
         self.assertEqual(result['status'], 'detoured')

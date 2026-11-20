@@ -67,12 +67,16 @@ def plan_route(
     held = holders_by_node(reservations, now, exclude_robot=robot_id)
     dynamic = {node for node in held if node not in permanent}
 
-    path = shortest_path(edges, start, goal, permanent | dynamic)
+    # Materialise the edges: they are consulted twice below, and a generator
+    # would already be exhausted by the second call.
+    edge_list = list(edges)
+
+    path = shortest_path(edge_list, start, goal, permanent | dynamic)
     if path:
         status = "detoured" if dynamic else "clear"
     else:
         # Distinguish "the map has no route" from "other robots are in the way".
-        status = "blocked_by_traffic" if dynamic and shortest_path(edges, start, goal, permanent) else "no_route"
+        status = "blocked_by_traffic" if dynamic and shortest_path(edge_list, start, goal, permanent) else "no_route"
 
     return {
         "path": path,
@@ -87,12 +91,18 @@ def lease_path(
     path: list[Node],
     *,
     robot_id: str,
-    mission_id: int,
+    mission_id: int | None,
     now: float,
     depth: int = DEFAULT_RESERVATION_DEPTH,
     seconds: float = DEFAULT_LEASE_SECONDS,
+    include_endpoints: bool = False,
 ) -> list[dict[str, Any]]:
-    """Lease the next few nodes of a path for one robot.
+    """Lease the transit nodes of a path for one robot.
+
+    Endpoints are excluded by default: a start or goal is a station several
+    robots may legitimately share (pick-up queues, drop-off bays). Reserving
+    them would mean no two missions could ever share a station, which is not
+    how a floor works. Only the corridor between stations is exclusive.
 
     Depth is bounded because a lease with no progress feed would otherwise hold
     an entire route indefinitely.
@@ -103,6 +113,8 @@ def lease_path(
         return []
     if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds <= 0:
         return []
+
+    leased = list(path) if include_endpoints else list(path[1:-1])
     return [
         {
             "node_id": node,
@@ -110,7 +122,7 @@ def lease_path(
             "mission_id": mission_id,
             "held_until": float(now) + float(seconds),
         }
-        for node in path[:depth]
+        for node in leased[:depth]
     ]
 
 
