@@ -12,7 +12,7 @@ RUN addgroup --system motiva && adduser --system --ingroup motiva motiva \
     && mkdir -p /data \
     && chown motiva:motiva /data
 
-COPY app/server.py app/navigation.py app/integration.py app/vda5050.py app/dispatch.py app/traffic.py app/index.html ./
+COPY app/server.py app/navigation.py app/integration.py app/vda5050.py app/dispatch.py app/traffic.py app/charging.py app/index.html ./
 
 USER motiva
 VOLUME ["/data"]

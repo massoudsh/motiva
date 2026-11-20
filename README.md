@@ -150,6 +150,22 @@ Only transit nodes are exclusive — a mission's start and goal are shared stati
 
 This is vertex-level, time-boxed reservation, not full traffic management: there is no deadlock-resolution loop and no per-segment time window.
 
+## Charger allocation
+
+Register bays, then send a low robot to charge:
+
+```bash
+curl -X POST http://localhost:8787/api/chargers \
+  -H 'Content-Type: application/json' -d '{"id":"C1","name":"Bay 1","x":20,"y":20}'
+
+curl http://localhost:8787/api/robots/R-01/charge        # dry run: should it charge, and where?
+curl -X POST http://localhost:8787/api/robots/R-01/charge -H 'Content-Type: application/json' -d '{}'
+```
+
+A robot is sent to charge at or below 25% (5% is flagged critical), and never while offline, already charging, or with an unknown battery. The nearest free bay wins; requesting an occupied one returns `charger_unavailable` rather than silently reassigning it. Leaving the bay — reporting `moving` or `waiting` over HTTP or VDA 5050 — releases it immediately.
+
+There is no charging queue: a robot refused because all bays are busy must be retried.
+
 ## معماری و توسعه
 
 - [معماری فنی](./ARCHITECTURE.md)

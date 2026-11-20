@@ -82,6 +82,37 @@ segment. Two robots can still meet mid-corridor if a lease expires while one is
 still travelling, and there is no deadlock-resolution loop. Vertex reservations
 with a bounded lease are an honest first step, not full traffic management.
 
+## Charge management
+
+`app/charging.py` decides *when* a robot should charge and *which* bay it gets.
+OEM fleet managers charge between jobs rather than only at exhaustion, because
+it protects battery life while keeping material moving.
+
+- **When:** at or below 25% charge; at or below 5% it is flagged `critical`. An
+  idle robot is the cheapest to charge and gets a distinct reason
+  (`idle_below_threshold`) from a busy one (`below_threshold`), so an operator
+  can see the trade-off rather than an opaque "send to charger".
+- **Never:** a stale/offline robot, an already-charging robot, or one with no
+  battery reading is never told to charge — a robot that is not reporting
+  cannot act on the command.
+- **Which:** the nearest free bay, using placed positions when both the robot
+  and charger have them. Otherwise bays order by id, so the choice stays
+  reproducible. Busy bays are named in `busy`, and an explicit request for an
+  occupied bay returns `charger_unavailable` instead of quietly reassigning it.
+- **One robot per bay** is enforced by the primary key, and the occupancy is a
+  lease that expires. A robot that reports `moving` or `waiting` (over HTTP or
+  via the VDA bridge) releases its bay immediately, otherwise a dead lease would
+  block the charger until expiry.
+
+Endpoints: `GET /api/chargers`, `POST /api/chargers`,
+`GET /api/robots/{id}/charge` (dry run) and `POST /api/robots/{id}/charge`.
+Low-battery alerts now carry `charging_available` and the suggested `charger`, so
+the warning states whether charging is actually achievable.
+
+**Known limit:** there is no charging *queue*. A robot refused because every bay
+is busy is not remembered and must be retried; there is also no cost model or
+charging-curve awareness, which VDA 5050 leaves to the vendor.
+
 ## Heartbeat and offline state
 
 A robot is offline when its last heartbeat is older than `MOTIVA_HEARTBEAT_TIMEOUT_SECONDS`, or when it has never reported. The stored `status` keeps what the robot last reported; the API exposes the derived `status` plus `reported_status`, `stale` and `heartbeat_at`. A stale robot is never counted as online, never raises a low-battery alert in place of an offline alert, and cannot be assigned a mission.

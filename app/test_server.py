@@ -425,5 +425,107 @@ class TrafficEndpointTests(OperationsFixture):
         self.assertFalse(data['traffic']['traffic_applied'])
 
 
+class ChargingEndpointTests(OperationsFixture):
+    def drain(self, robot_id, battery):
+        return self.post('/api/telemetry', {'id': robot_id, 'status': 'waiting', 'battery': battery, 'position': {'x': 10, 'y': 10}})
+
+    def add(self, charger_id, **coords):
+        return self.post('/api/chargers', {'id': charger_id, 'name': charger_id, **coords})
+
+    def test_charger_can_be_registered_and_listed(self):
+        self.assertEqual(self.add('C1', x=20, y=30)[0], 201)
+        status, data = self.get('/api/chargers')
+        self.assertEqual(status, 200)
+        self.assertEqual(data['chargers'][0]['position'], {'x': 20, 'y': 30})
+        self.assertEqual(data['occupancies'], [])
+
+    def test_invalid_charger_payloads_are_rejected(self):
+        for payload in ({}, {'id': ''}, {'id': 'C1', 'x': 10}, {'id': 'C1', 'x': -1, 'y': 10}, {'id': 'C1', 'x': True, 'y': 10}):
+            with self.subTest(payload=payload):
+                self.assertEqual(self.post('/api/chargers', payload)[0], 422)
+
+    def test_healthy_robot_is_not_sent_to_charge(self):
+        self.add('C1')
+        status, data = self.get('/api/robots/R-01/charge')
+        self.assertEqual(status, 200)
+        self.assertFalse(data['charge'])
+        self.assertEqual(data['reason'], 'battery_sufficient')
+        self.assertEqual(self.post('/api/robots/R-01/charge', {})[0], 409)
+
+    def test_low_robot_is_assigned_a_free_charger(self):
+        self.add('C1')
+        self.drain('R-01', 15)
+        status, data = self.post('/api/robots/R-01/charge', {})
+        self.assertEqual(status, 200)
+        self.assertEqual(data['charger'], 'C1')
+        self.assertEqual(data['robot']['status'], 'charging')
+
+        _, listing = self.get('/api/chargers')
+        self.assertEqual([(o['charger_id'], o['robot_id']) for o in listing['occupancies']], [('C1', 'R-01')])
+
+    def test_second_robot_cannot_take_an_occupied_charger(self):
+        self.add('C1')
+        self.drain('R-01', 15)
+        self.drain('R-04', 15)
+        self.assertEqual(self.post('/api/robots/R-01/charge', {})[0], 200)
+        status, data = self.post('/api/robots/R-04/charge', {})
+        self.assertEqual(status, 409)
+        self.assertEqual(data['error'], 'all_chargers_busy')
+
+    def test_explicit_busy_charger_is_refused_not_silently_reassigned(self):
+        self.add('C1')
+        self.add('C2')
+        self.drain('R-01', 15)
+        self.drain('R-04', 15)
+        self.post('/api/robots/R-01/charge', {'charger': 'C1'})
+        status, data = self.post('/api/robots/R-04/charge', {'charger': 'C1'})
+        self.assertEqual(status, 409)
+        self.assertEqual(data['error'], 'charger_unavailable')
+
+    def test_robot_leaving_the_bay_frees_the_charger(self):
+        self.add('C1')
+        self.drain('R-01', 15)
+        self.post('/api/robots/R-01/charge', {})
+        self.drain('R-01', 90)  # reports waiting again, i.e. it left the bay
+        _, listing = self.get('/api/chargers')
+        self.assertEqual(listing['occupancies'], [])
+        self.drain('R-04', 15)
+        self.assertEqual(self.post('/api/robots/R-04/charge', {})[0], 200)
+
+    def test_vda_state_that_is_not_charging_also_frees_the_bay(self):
+        self.add('C1')
+        self.drain('R-01', 15)
+        self.post('/api/robots/R-01/charge', {})
+        self.post('/api/integrations/vda5050', {
+            'agv_id': 'R-01', 'message_type': 'state',
+            'payload': {'batteryState': {'batteryCharge': 90},
+                        'agvPosition': {'x': 10, 'y': 10, 'positionInitialized': True},
+                        'orderId': '', 'safetyState': {'eStop': 'NONE'}},
+        })
+        _, listing = self.get('/api/chargers')
+        self.assertEqual(listing['occupancies'], [])
+
+    def test_unknown_robot_and_no_chargers_are_reported(self):
+        self.assertEqual(self.get('/api/robots/NOPE/charge')[0], 404)
+        self.assertEqual(self.post('/api/robots/NOPE/charge', {})[0], 404)
+        self.drain('R-01', 10)
+        status, data = self.post('/api/robots/R-01/charge', {})
+        self.assertEqual(status, 409)
+        self.assertEqual(data['error'], 'no_chargers_configured')
+
+    def test_low_battery_alert_says_whether_charging_is_achievable(self):
+        self.drain('R-01', 15)
+        _, alerts = self.get('/api/alerts')
+        alert = next(a for a in alerts['alerts'] if a['type'] == 'low_battery' and a['robot'] == 'R-01')
+        self.assertFalse(alert['charging_available'])
+        self.assertIsNone(alert['charger'])
+
+        self.add('C1')
+        _, alerts = self.get('/api/alerts')
+        alert = next(a for a in alerts['alerts'] if a['type'] == 'low_battery' and a['robot'] == 'R-01')
+        self.assertTrue(alert['charging_available'])
+        self.assertEqual(alert['charger'], 'C1')
+
+
 if __name__ == '__main__':
     unittest.main()

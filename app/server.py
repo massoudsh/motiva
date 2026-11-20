@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+import charging
 import dispatch
 import traffic
 import vda5050
@@ -39,6 +40,7 @@ SEED_ROBOTS = (
 )
 MISSION_PATH = re.compile(r"^/api/missions/(\d+)/(assign|cancel)$")
 DISPATCH_PATH = re.compile(r"^/api/missions/(\d+)/dispatch$")
+ROBOT_CHARGE_PATH = re.compile(r"^/api/robots/([^/]+)/charge$")
 
 
 def connection() -> sqlite3.Connection:
@@ -111,6 +113,13 @@ def initialize_db() -> None:
             node_id TEXT PRIMARY KEY, robot_id TEXT NOT NULL, mission_id INTEGER,
             held_until REAL NOT NULL, acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(node_id) REFERENCES map_nodes(id))""")
+        db.execute("""CREATE TABLE IF NOT EXISTS chargers (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, x INTEGER, y INTEGER)""")
+        # One robot per charger, enforced by the primary key like corridors.
+        db.execute("""CREATE TABLE IF NOT EXISTS charger_occupancies (
+            charger_id TEXT PRIMARY KEY, robot_id TEXT NOT NULL,
+            held_until REAL NOT NULL, since TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(charger_id) REFERENCES chargers(id))""")
         if not db.execute("SELECT 1 FROM missions LIMIT 1").fetchone():
             db.executemany("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", SEED_MISSIONS)
         db.execute("INSERT OR IGNORE INTO mission_details(mission_id) SELECT id FROM missions")
@@ -298,6 +307,68 @@ def lease_mission_route(
     }
 
 
+def read_chargers(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [read_chargers_row(row) for row in db.execute("SELECT * FROM chargers ORDER BY id")]
+
+
+def read_occupancies(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [
+        {"charger_id": row["charger_id"], "robot_id": row["robot_id"], "held_until": row["held_until"]}
+        for row in db.execute("SELECT * FROM charger_occupancies")
+    ]
+
+
+def charging_occupancies(db: sqlite3.Connection, now: float) -> list[dict[str, Any]]:
+    """Only occupancies whose lease is still live, so the API never shows a ghost."""
+    return [occupancy for occupancy in read_occupancies(db) if occupancy["held_until"] > now]
+
+
+def read_chargers_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "position": {"x": row["x"], "y": row["y"]} if row["x"] is not None and row["y"] is not None else None,
+    }
+
+
+def claim_charger(db: sqlite3.Connection, lease: dict[str, Any], now: float) -> dict[str, Any] | None:
+    """Occupy a charger inside the open transaction, or return the current holder."""
+    db.execute("DELETE FROM charger_occupancies WHERE held_until <= ?", (now,))
+    row = db.execute("SELECT robot_id FROM charger_occupancies WHERE charger_id = ?", (lease["charger_id"],)).fetchone()
+    if row is not None and row["robot_id"] != lease["robot_id"]:
+        return {"charger_id": lease["charger_id"], "robot_id": row["robot_id"]}
+    db.execute(
+        "INSERT INTO charger_occupancies(charger_id, robot_id, held_until) VALUES (?, ?, ?) "
+        "ON CONFLICT(charger_id) DO UPDATE SET robot_id = excluded.robot_id, held_until = excluded.held_until",
+        (lease["charger_id"], lease["robot_id"], lease["held_until"]),
+    )
+    return None
+
+
+def release_charger(db: sqlite3.Connection, *, robot_id: str | None = None, charger_id: str | None = None) -> int:
+    if robot_id is not None:
+        return db.execute("DELETE FROM charger_occupancies WHERE robot_id = ?", (robot_id,)).rowcount
+    if charger_id is not None:
+        return db.execute("DELETE FROM charger_occupancies WHERE charger_id = ?", (charger_id,)).rowcount
+    return 0
+
+
+def charge_plan(robot_row: sqlite3.Row | None = None, now: float | None = None) -> dict[str, Any]:
+    """Whether the robot should charge, and which charger it would get."""
+    now = time.time() if now is None else now
+    with connection() as db:
+        if robot_row is None:
+            return {"charge": False, "reason": "robot_not_found"}
+        robot = robot_payload(robot_row, now)
+        decision = charging.should_charge(robot["battery"], status=robot["status"])
+        if not decision["charge"]:
+            return {**decision, "charger": None}
+        allocation = charging.rank_chargers(
+            read_chargers(db), read_occupancies(db), robot_position=robot["position"], now=now,
+        )
+        return {**decision, "charger": allocation}
+
+
 def dispatch_preview(mission_row: sqlite3.Row | None = None, origin: str | None = None) -> dict[str, Any]:
     with connection() as db:
         now = time.time()
@@ -360,6 +431,10 @@ class Handler(BaseHTTPRequestHandler):
         if dispatch_get:
             self.dispatch_mission(int(dispatch_get.group(1)))
             return
+        charge_get = ROBOT_CHARGE_PATH.match(path)
+        if charge_get:
+            self.get_charge_plan(charge_get.group(1))
+            return
         self.path = path
         if self.path == "/":
             body = (Path(__file__).parent / "index.html").read_bytes()
@@ -382,6 +457,8 @@ class Handler(BaseHTTPRequestHandler):
             self.get_alerts()
         elif self.path == "/api/reports":
             self.get_report()
+        elif self.path == "/api/chargers":
+            self.get_chargers()
         else:
             self._send(404, {"error": "route_not_found"})
 
@@ -408,6 +485,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/map/route":
             self.calculate_route(payload)
+            return
+        if path == "/api/chargers":
+            self.add_charger(payload)
+            return
+        charge_post = ROBOT_CHARGE_PATH.match(path)
+        if charge_post:
+            self.start_charge(charge_post.group(1), payload)
             return
         if path == "/api/missions":
             self.create_mission(payload)
@@ -484,6 +568,8 @@ class Handler(BaseHTTPRequestHandler):
                 "INSERT INTO telemetry_history(robot_id, status, battery, x, y) VALUES (?, ?, ?, ?, ?)",
                 (agv_id.strip(), telemetry["status"], telemetry["battery"], telemetry["position"]["x"], telemetry["position"]["y"]),
             )
+            if telemetry["status"] != "charging":
+                release_charger(db, robot_id=agv_id.strip())
         self._send(200, {"accepted": True, "agv_id": agv_id.strip(), "telemetry": telemetry})
 
     def receive_integration_event(self, payload: Any) -> None:
@@ -512,13 +598,24 @@ class Handler(BaseHTTPRequestHandler):
         with connection() as db:
             rows = db.execute("SELECT * FROM robots ORDER BY id").fetchall()
             missions = db.execute("SELECT id, origin, destination FROM missions WHERE status = 'waiting' ORDER BY id").fetchall()
+            free = charging.free_chargers(read_chargers(db), read_occupancies(db), now)
         alerts = []
         for row in rows:
             robot = robot_payload(row, now)
             if robot["stale"]:
                 alerts.append({"type": "robot_offline", "severity": "critical", "robot": robot["id"], "battery": robot["battery"]})
             elif robot["battery"] <= 20:
-                alerts.append({"type": "low_battery", "severity": "warning", "robot": robot["id"], "battery": robot["battery"]})
+                # Say whether charging is actually achievable, not just that the
+                # battery is low: a warning with no free bay is a dead end.
+                decision = charging.should_charge(robot["battery"], status=robot["status"])
+                alerts.append({
+                    "type": "low_battery",
+                    "severity": "warning",
+                    "robot": robot["id"],
+                    "battery": robot["battery"],
+                    "charging_available": bool(free) and decision["charge"],
+                    "charger": free[0]["id"] if free and decision["charge"] else None,
+                })
             if robot["e_stop"] != "NONE":
                 alerts.append({"type": "emergency_stop", "severity": "critical", "robot": robot["id"], "e_stop": robot["e_stop"]})
             if robot["field_violation"]:
@@ -740,6 +837,89 @@ class Handler(BaseHTTPRequestHandler):
             row = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
         self._send(200, {"mission": mission_payload(row), "released_nodes": released})
 
+    def get_chargers(self) -> None:
+        now = time.time()
+        with connection() as db:
+            chargers = read_chargers(db)
+            occupancies = charging_occupancies(db, now)
+        self._send(200, {"chargers": chargers, "occupancies": occupancies})
+
+    def get_charge_plan(self, robot_id: str) -> None:
+        with connection() as db:
+            robot = db.execute("SELECT * FROM robots WHERE id = ?", (robot_id,)).fetchone()
+        if robot is None:
+            self._send(404, {"error": "robot_not_found"})
+            return
+        self._send(200, {"robot": robot_id, **charge_plan(robot)})
+
+    def add_charger(self, payload: Any) -> None:
+        if not isinstance(payload, dict) or not isinstance(payload.get("id"), str) or not payload["id"].strip():
+            self._send(422, {"error": "charger_id_required"})
+            return
+        name = payload.get("name", payload["id"])
+        if not isinstance(name, str) or not name.strip():
+            self._send(422, {"error": "invalid_charger_name"})
+            return
+        coords: dict[str, int | None] = {}
+        for axis in ("x", "y"):
+            value = payload.get(axis)
+            if value is None:
+                coords[axis] = None
+            elif isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+                self._send(422, {"error": "invalid_charger_coordinates"})
+                return
+            else:
+                coords[axis] = value
+        if (coords["x"] is None) != (coords["y"] is None):
+            self._send(422, {"error": "invalid_charger_coordinates"})
+            return
+        charger_id = payload["id"].strip()
+        with connection() as db:
+            db.execute(
+                "INSERT INTO chargers(id, name, x, y) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET name = excluded.name, x = COALESCE(excluded.x, chargers.x), y = COALESCE(excluded.y, chargers.y)",
+                (charger_id, name.strip(), coords["x"], coords["y"]),
+            )
+            row = db.execute("SELECT * FROM chargers WHERE id = ?", (charger_id,)).fetchone()
+        self._send(201, {"charger": read_chargers_row(row)})
+
+    def start_charge(self, robot_id: str, payload: Any) -> None:
+        """Send a robot to a charger, honouring the charger's single occupant."""
+        body = payload if isinstance(payload, dict) else {}
+        requested = body.get("charger")
+        if requested is not None and (not isinstance(requested, str) or not requested.strip()):
+            self._send(422, {"error": "invalid_charger"})
+            return
+        now = time.time()
+        with connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            robot = db.execute("SELECT * FROM robots WHERE id = ?", (robot_id,)).fetchone()
+            if robot is None:
+                self._send(404, {"error": "robot_not_found"})
+                return
+            plan = charge_plan(robot, now)
+            if not plan["charge"]:
+                self._send(409, {"error": "charging_not_required", "plan": plan})
+                return
+            allocation = plan["charger"]
+            if requested is not None:
+                match = next((c for c in allocation["available"] if c["id"] == requested.strip()), None)
+                if match is None:
+                    self._send(409, {"error": "charger_unavailable", "plan": plan})
+                    return
+                allocation = {**allocation, "selected": requested.strip()}
+            if allocation["selected"] is None:
+                self._send(409, {"error": allocation["reason"] or "no_charger_available", "plan": plan})
+                return
+            lease = charging.lease_charger(allocation["selected"], robot["id"], now=now)
+            conflict = claim_charger(db, lease, now)
+            if conflict:
+                self._send(409, {"error": "charger_busy", "conflict": conflict})
+                return
+            db.execute("UPDATE robots SET status = 'charging' WHERE id = ?", (robot["id"],))
+            updated = db.execute("SELECT * FROM robots WHERE id = ?", (robot["id"],)).fetchone()
+        self._send(200, {"robot": robot_payload(updated), "charger": allocation["selected"], "plan": allocation})
+
     def update_telemetry(self, payload: Any) -> None:
         if not isinstance(payload, dict) or not isinstance(payload.get("id"), str):
             self._send(422, {"error": "robot_id_is_required"})
@@ -760,6 +940,10 @@ class Handler(BaseHTTPRequestHandler):
             )
             if cursor.rowcount:
                 db.execute("INSERT INTO telemetry_history(robot_id, status, battery, x, y) VALUES (?, ?, ?, ?, ?)", (payload["id"], status, battery, position["x"], position["y"]))
+                if status != "charging":
+                    # A robot that reports moving/waiting has left the bay; without
+                    # this the charger stays blocked until its lease expires.
+                    release_charger(db, robot_id=payload["id"])
             row = db.execute("SELECT * FROM robots WHERE id = ?", (payload["id"],)).fetchone()
         if cursor.rowcount == 0:
             self._send(404, {"error": "robot_not_found"})
