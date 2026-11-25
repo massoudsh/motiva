@@ -171,6 +171,7 @@ Dispatch uses the same threshold: a robot at or below 25% is not offered new mis
 ## معماری و توسعه
 
 - [معماری فنی](./ARCHITECTURE.md)
+- [تحلیل رقبا](./docs/competitive-analysis.md)
 - [تنظیمات محلی نمونه](./.env.example)
 - تست‌ها: `python -m unittest discover -s app -p 'test_*.py'`
 

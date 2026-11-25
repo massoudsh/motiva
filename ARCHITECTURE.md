@@ -140,6 +140,44 @@ the warning states whether charging is actually achievable.
 is busy is not remembered and must be retried; there is also no cost model or
 charging-curve awareness, which VDA 5050 leaves to the vendor.
 
+## Mission queue and completion
+
+`app/queueing.py` defines the single "next mission" order: priority (urgent,
+high, normal, low), then deadline (a mission without one sorts after one with
+one at the same priority), then creation order. `GET /api/missions/queue`
+serves that order so the dashboard and the dispatcher agree.
+
+`POST /api/missions/{id}/complete` is the only way to close a running mission.
+It marks the mission `done`, sets progress to 100%, returns the robot to
+`waiting` only if it was still `moving` (charging and stale robots keep their
+own state), and releases the mission's corridor leases. Progress is 25% on
+assignment. Any other status is rejected with `409`.
+
+## Zone rules
+
+`POST /api/map/rules` stores `max_speed` and `restricted` per map node.
+`restricted` is enforced by writing the same node into `map_obstacles`, so
+routing uses the mechanism it already has instead of a second one. `max_speed`
+is stored and audited only; no robot-side speed enforcement exists, and the
+response returns `speed_enforced: false` rather than implying otherwise.
+
+## Audit log
+
+`audit_log` is append-only by convention — no endpoint updates or deletes rows.
+Mission create, assign, cancel and complete plus zone-rule changes record actor,
+action, subject and detail. The actor is supplied by the caller and defaults to
+`operator`; binding it to an authenticated principal is the authentication work
+in issue #1. `GET /api/audit?limit=N` (1–500) returns newest first. There is no
+tamper-evident chain, so this is accountability, not forensic proof.
+
+## Operations analytics
+
+`app/analytics.py` summarises stored rows only: mission status mix and
+completion rate, daily telemetry sample counts, busiest robots, and a
+moving-sample share. The share is an estimate (moving samples over a
+per-minute-per-robot capacity), not measured uptime, and the payload carries a
+`definitions` block saying so. `GET /api/analytics?days=1|7|30`.
+
 ## Heartbeat and offline state
 
 A robot is offline when its last heartbeat is older than `MOTIVA_HEARTBEAT_TIMEOUT_SECONDS`, or when it has never reported. The stored `status` keeps what the robot last reported; the API exposes the derived `status` plus `reported_status`, `stale` and `heartbeat_at`. A stale robot is never counted as online, never raises a low-battery alert in place of an offline alert, and cannot be assigned a mission.
