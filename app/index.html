@@ -7,7 +7,7 @@
   <style>
     :root{color-scheme:dark;--ink:#0b1220;--panel:#141b2e;--line:#334155;--text:#e5e7eb;--muted:#a6b3c8;--cyan:#22d3ee;--green:#6ee7b7;--amber:#fbbf24;--red:#fda4af}
     *{box-sizing:border-box}body{margin:0;background:var(--ink);color:var(--text);font:15px/1.8 Tahoma,Arial,sans-serif}button,input,select{font:inherit}button,a,input,select{touch-action:manipulation}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.5}a{color:var(--cyan)}:focus-visible{outline:3px solid var(--cyan);outline-offset:3px}[hidden]{display:none!important}
-    .skip{position:absolute;inset-inline-start:16px;top:-80px;padding:12px;background:var(--panel);z-index:10}.skip:focus{top:12px}.shell{display:flex;min-height:100vh}.sidebar{width:220px;flex:none;border-inline-end:1px solid var(--line);padding:26px 18px}.brand{font-size:22px;color:white}.brand small{display:block;color:var(--muted);font-size:12px}.nav{display:grid;gap:10px;margin:28px 0}.nav a{padding:10px 14px;border-radius:8px;text-decoration:none}.nav a:hover{background:var(--panel)}.muted{color:var(--muted);font-size:13px}.main{min-width:0;width:100%;max-width:1400px;margin:auto;padding:28px}.topbar,.card-head,.actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:18px;margin:0}p{margin:8px 0}.button,input,select{border:1px solid var(--line);border-radius:8px;background:#1e293b;color:var(--text);padding:10px 14px;min-height:44px}.primary{background:var(--cyan);color:var(--ink);font-weight:bold}.danger{color:var(--red)}.notice{border:1px solid var(--line);border-inline-start:4px solid var(--amber);padding:12px 16px;border-radius:8px;margin:20px 0}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-block:22px}.card{border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}.kpi{padding:18px}.value{font-size:29px;font-weight:bold;color:white;margin-block:8px}.grid{display:grid;grid-template-columns:1.3fr 1fr;gap:18px}.card-head{padding:18px;border-bottom:1px solid var(--line)}.content{padding:18px}section{scroll-margin-top:16px}.missions{margin-top:20px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap;text-align:start}caption{text-align:start;padding:12px 18px;color:var(--muted);font-size:13px}th,td{padding:12px 16px;border-bottom:1px solid var(--line);text-align:start}th{color:var(--muted);font-size:13px}td .button{font-size:13px;margin:3px}.status{display:inline-block;border-radius:6px;padding:3px 8px;font-size:13px}.running,.moving{color:var(--cyan)}.waiting{color:var(--amber)}.done,.charging{color:var(--green)}.cancelled,.offline{color:var(--muted)}.map{height:300px;position:relative;background-image:linear-gradient(#26334d66 1px,transparent 1px),linear-gradient(90deg,#26334d66 1px,transparent 1px);background-size:36px 36px}.robot-layer{position:absolute;inset:28px}.robot{position:absolute;transform:translate(50%,-50%);border:2px solid currentColor;background:var(--ink);border-radius:8px;padding:2px 5px;font:12px/1.6 monospace;direction:ltr}.map-note{padding:12px 18px;color:var(--muted);font-size:13px}.filters{display:flex;gap:16px;flex-wrap:wrap;padding:16px}.filters label{display:grid;gap:5px;flex:1;min-width:180px}.empty{text-align:center;color:var(--muted);padding:24px}.error{color:var(--red)}dialog{width:min(520px,calc(100% - 28px));max-height:90vh;overflow:auto;border:1px solid var(--line);border-radius:14px;padding:24px;background:var(--panel);color:var(--text)}dialog::backdrop{background:#000a}form label{display:grid;gap:6px;margin-block:16px}form .actions{margin-top:22px}#toast{position:fixed;bottom:18px;inset-inline-end:18px;max-width:calc(100% - 36px);padding:12px 18px;background:var(--panel);border:1px solid var(--cyan);border-radius:8px;z-index:5}#toast:empty{display:none}
+    .skip{position:absolute;inset-inline-start:16px;top:-80px;padding:12px;background:var(--panel);z-index:10}.skip:focus{top:12px}.shell{display:flex;min-height:100vh}.sidebar{width:220px;flex:none;border-inline-end:1px solid var(--line);padding:26px 18px}.brand{font-size:22px;color:white}.brand small{display:block;color:var(--muted);font-size:12px}.nav{display:grid;gap:10px;margin:28px 0}.nav a{padding:10px 14px;border-radius:8px;text-decoration:none}.nav a:hover{background:var(--panel)}.muted{color:var(--muted);font-size:13px}.main{min-width:0;width:100%;max-width:1400px;margin:auto;padding:28px}.topbar,.card-head,.actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h1{font-size:26px;margin:0}h2{font-size:18px;margin:0}p{margin:8px 0}.button,input,select{border:1px solid var(--line);border-radius:8px;background:#1e293b;color:var(--text);padding:10px 14px;min-height:44px}.primary{background:var(--cyan);color:var(--ink);font-weight:bold}.danger{color:var(--red)}.notice{border:1px solid var(--line);border-inline-start:4px solid var(--amber);padding:12px 16px;border-radius:8px;margin:20px 0}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-block:22px}.card{border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}.kpi{padding:18px}.value{font-size:29px;font-weight:bold;color:white;margin-block:8px}.grid{display:grid;grid-template-columns:1.3fr 1fr;gap:18px}.card-head{padding:18px;border-bottom:1px solid var(--line)}.content{padding:18px}section{scroll-margin-top:16px}.missions{margin-top:20px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap;text-align:start}caption{text-align:start;padding:12px 18px;color:var(--muted);font-size:13px}th,td{padding:12px 16px;border-bottom:1px solid var(--line);text-align:start}th{color:var(--muted);font-size:13px}td .button{font-size:13px;margin:3px}.status{display:inline-block;border-radius:6px;padding:3px 8px;font-size:13px}.running,.moving{color:var(--cyan)}.waiting{color:var(--amber)}.done,.charging{color:var(--green)}.cancelled,.offline{color:var(--muted)}.map{height:300px;position:relative;background-image:linear-gradient(#26334d66 1px,transparent 1px),linear-gradient(90deg,#26334d66 1px,transparent 1px);background-size:36px 36px}.robot-layer{position:absolute;inset:28px}.robot{position:absolute;transform:translate(50%,-50%);border:2px solid currentColor;background:var(--ink);border-radius:8px;padding:2px 5px;font:12px/1.6 monospace;direction:ltr}.map-note{padding:12px 18px;color:var(--muted);font-size:13px}.filters{display:flex;gap:16px;flex-wrap:wrap;padding:16px}.filters label{display:grid;gap:5px;flex:1;min-width:180px}.empty{text-align:center;color:var(--muted);padding:24px}.error{color:var(--red)}dialog{width:min(520px,calc(100% - 28px));max-height:90vh;overflow:auto;border:1px solid var(--line);border-radius:14px;padding:24px;background:var(--panel);color:var(--text)}dialog::backdrop{background:#000a}form label{display:grid;gap:6px;margin-block:16px}form .actions{margin-top:22px}.queue-item{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}.queue-item:last-child{border-bottom:0}.pill{border:1px solid var(--line);border-radius:999px;padding:1px 10px;font-size:12px}.bars{display:flex;align-items:flex-end;gap:6px;height:90px;margin:14px 0}.bars span{flex:1;background:var(--cyan);border-radius:4px 4px 0 0;min-height:3px}#toast{position:fixed;bottom:18px;inset-inline-end:18px;max-width:calc(100% - 36px);padding:12px 18px;background:var(--panel);border:1px solid var(--cyan);border-radius:8px;z-index:5}#toast:empty{display:none}
     @media(max-width:1000px){.sidebar{width:175px}.main{padding:20px}.kpis{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}@media(max-width:650px){.shell{display:block}.sidebar{width:auto;padding:16px;border-inline-end:0;border-bottom:1px solid var(--line)}.nav{display:flex;overflow:auto;margin:10px 0 0;gap:4px}.nav a{white-space:nowrap;padding:8px}.sidebar>.muted{display:none}.main{padding:16px}.value{font-size:24px}.kpi{padding:12px}h1{font-size:22px}}
   </style>
 </head>
@@ -16,7 +16,7 @@
 <div class="shell">
   <aside class="sidebar">
     <div class="brand">موجَک <small lang="en">MOTIVA OPERATIONS</small></div>
-    <nav class="nav" aria-label="ناوبری اصلی"><a href="#overview">نمای کلی</a><a href="#fleet">ناوگان</a><a href="#mapSection">نقشه</a><a href="#missions">مأموریت‌ها</a></nav>
+    <nav class="nav" aria-label="ناوبری اصلی"><a href="#overview">نمای کلی</a><a href="#fleet">ناوگان</a><a href="#mapSection">نقشه</a><a href="#missions">مأموریت‌ها</a><a href="#queue">صف کار</a><a href="#analytics">تحلیل</a><a href="#audit">ممیزی</a></nav>
     <p class="muted">نسخه آزمایشی محلی<br>اتصال سخت‌افزاری و WMS پیاده‌سازی نشده است.</p>
   </aside>
   <main class="main" id="main" tabindex="-1">
@@ -36,8 +36,13 @@
     </div>
     <section class="card missions" id="missions" aria-labelledby="missionsTitle"><div class="card-head"><div><h2 id="missionsTitle">مأموریت‌های اخیر</h2><p class="muted">۱۰ رکورد اخیر؛ جست‌وجو و فیلتر فقط روی همین رکوردها اعمال می‌شود.</p></div><button class="button primary" id="newMission" disabled>مأموریت جدید</button></div>
       <div class="filters"><label for="missionSearch">جست‌وجو<input id="missionSearch" type="search" placeholder="شناسه، مبدأ، مقصد یا ربات"></label><label for="statusFilter">وضعیت<select id="statusFilter"><option value="">همه وضعیت‌ها</option><option value="waiting">در صف</option><option value="running">در حال اجرا</option><option value="done">تکمیل شده</option><option value="cancelled">لغو شده</option></select></label></div>
-      <div class="table-wrap"><table><caption id="missionCount">در انتظار داده</caption><thead><tr><th scope="col">شناسه</th><th scope="col">مبدأ</th><th scope="col">مقصد</th><th scope="col">ربات</th><th scope="col">وضعیت</th><th scope="col">زمان ثبت‌شده</th><th scope="col">عملیات</th></tr></thead><tbody id="missionRows"><tr><td colspan="7" class="empty">در انتظار داده</td></tr></tbody></table></div>
+      <div class="table-wrap"><table><caption id="missionCount">در انتظار داده</caption><thead><tr><th scope="col">شناسه</th><th scope="col">مبدأ</th><th scope="col">مقصد</th><th scope="col">ربات</th><th scope="col">وضعیت</th><th scope="col">زمان ثبت‌شده</th><th scope="col">اولویت</th><th scope="col">پیشرفت</th><th scope="col">عملیات</th></tr></thead><tbody id="missionRows"><tr><td colspan="9" class="empty">در انتظار داده</td></tr></tbody></table></div>
     </section>
+    <div class="grid">
+      <section class="card" id="queue" aria-labelledby="queueTitle"><div class="card-head"><h2 id="queueTitle">صف کار اولویت‌دار</h2><span class="muted" id="queueCount"></span></div><div class="content" id="queueList"><p class="empty">در انتظار داده</p></div></section>
+      <section class="card" id="analytics" aria-labelledby="analyticsTitle"><div class="card-head"><h2 id="analyticsTitle">تحلیل عملیات</h2><label class="muted" for="analyticsPeriod">بازه<select id="analyticsPeriod"><option value="1">۲۴ ساعت</option><option value="7" selected>۷ روز</option><option value="30">۳۰ روز</option></select></label></div><div class="content" id="analyticsBody"><p class="empty">در انتظار داده</p></div></section>
+    </div>
+    <section class="card missions" id="audit" aria-labelledby="auditTitle"><div class="card-head"><h2 id="auditTitle">گزارش ممیزی</h2><span class="muted">آخرین ۲۰ اقدام</span></div><div class="table-wrap"><table><caption>هر ایجاد، تخصیص، لغو، تکمیل و تغییر محدودیت با کاربر و زمان ثبت می‌شود.</caption><thead><tr><th scope="col">زمان</th><th scope="col">کاربر</th><th scope="col">اقدام</th><th scope="col">موضوع</th><th scope="col">جزئیات</th></tr></thead><tbody id="auditRows"><tr><td colspan="5" class="empty">در انتظار داده</td></tr></tbody></table></div></section>
     <noscript><p class="notice">برای استفاده از داشبورد، جاوااسکریپت را فعال کنید.</p></noscript>
   </main>
 </div>
@@ -54,9 +59,10 @@
 <script>
   const $ = id => document.getElementById(id);
   const number = new Intl.NumberFormat('fa-IR');
+  const priorityLabels = {urgent:'فوری',high:'بالا',normal:'عادی',low:'پایین'};
   const statusLabels = {done:'تکمیل شده',running:'در حال اجرا',waiting:'در صف',cancelled:'لغو شده'};
   const robotLabels = {moving:'در حرکت',waiting:'آماده',charging:'در حال شارژ',offline:'آفلاین'};
-  const actionErrors = {robot_offline:'ربات انتخاب‌شده آفلاین یا بدون گزارش تازه است.',robot_not_found:'ربات پیدا نشد.',mission_not_assignable:'وضعیت مأموریت تغییر کرده؛ دوباره به‌روزرسانی کنید.',only_waiting_missions_can_be_cancelled:'فقط مأموریت در صف قابل لغو است.',mission_not_found:'مأموریت پیدا نشد.',origin_and_destination_are_required:'مبدأ و مقصد را وارد کنید.',no_eligible_robot:'ربات واجد شرایطی برای تخصیص خودکار وجود ندارد.',charging_not_required:'این ربات در حال حاضر نیازی به شارژ ندارد.',no_chargers_configured:'هنوز شارژری ثبت نشده است.',all_chargers_busy:'همهٔ شارژرها اشغال‌اند.',charger_unavailable:'شارژر انتخاب‌شده در دسترس نیست.',charger_busy:'شارژر همین حالا توسط ربات دیگری گرفته شد.'};
+  const actionErrors = {robot_offline:'ربات انتخاب‌شده آفلاین یا بدون گزارش تازه است.',robot_not_found:'ربات پیدا نشد.',mission_not_assignable:'وضعیت مأموریت تغییر کرده؛ دوباره به‌روزرسانی کنید.',only_waiting_missions_can_be_cancelled:'فقط مأموریت در صف قابل لغو است.',only_running_missions_can_complete:'فقط مأموریت در حال اجرا قابل تکمیل است.',mission_not_found:'مأموریت پیدا نشد.',origin_and_destination_are_required:'مبدأ و مقصد را وارد کنید.',no_eligible_robot:'ربات واجد شرایطی برای تخصیص خودکار وجود ندارد.',charging_not_required:'این ربات در حال حاضر نیازی به شارژ ندارد.',no_chargers_configured:'هنوز شارژری ثبت نشده است.',all_chargers_busy:'همهٔ شارژرها اشغال‌اند.',charger_unavailable:'شارژر انتخاب‌شده در دسترس نیست.',charger_busy:'شارژر همین حالا توسط ربات دیگری گرفته شد.'};
   const componentLabels = {battery:'باتری',workload:'بار کاری',distance:'فاصله'};
   const reasonLabels = {status_offline:'آفلاین یا بدون گزارش تازه',status_charging:'در حال شارژ',battery_unknown:'باتری نامشخص',battery_below_threshold:'باتری کمتر از حد آستانه'};
   const alertLabels = {low_battery:'باتری کم',robot_offline:'بدون گزارش تازه',mission_waiting:'مأموریت در صف',emergency_stop:'توقف اضطراری',protective_field:'ورود به میدان حفاظتی',charger_queue_stuck:'در صف شارژ مانده'};
@@ -72,6 +78,7 @@
   function missionActions(mission) {
     const id = escapeHtml(mission.id), disabled = !connected || submitting ? ' disabled' : '';
     if (mission.status === 'waiting') return `<button class="button" data-action="assign" data-id="${id}"${disabled}>تخصیص ربات</button><button class="button danger" data-action="cancel" data-id="${id}"${disabled}>لغو</button>`;
+    if (mission.status === 'running') return `<button class="button" data-action="complete" data-id="${id}"${disabled}>تکمیل</button>`;
     if (mission.status === 'cancelled') return `<button class="button" data-action="assign" data-id="${id}"${disabled}>تخصیص مجدد</button>`;
     return '—';
   }
@@ -79,7 +86,28 @@
     const query = $('missionSearch').value.trim().toLocaleLowerCase(), status = $('statusFilter').value;
     const items = latestMissions.filter(m => (!status || m.status === status) && [m.id,m.origin,m.destination,m.robot].some(v => String(v).toLocaleLowerCase().includes(query)));
     $('missionCount').textContent = `${number.format(items.length)} رکورد از ${number.format(latestMissions.length)} مأموریت اخیر`;
-    $('missionRows').innerHTML = items.map(m => `<tr><td><bdi>${escapeHtml(m.id)}</bdi></td><td>${escapeHtml(m.origin)}</td><td>${escapeHtml(m.destination)}</td><td><bdi>${escapeHtml(m.robot)}</bdi></td><td class="${Object.hasOwn(statusLabels,m.status) ? m.status : ''}">${statusLabels[m.status] || 'نامشخص'}</td><td>${escapeHtml(formatTime(m.started_at))}</td><td>${missionActions(m)}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">مأموریتی برای نمایش وجود ندارد.</td></tr>';
+    $('missionRows').innerHTML = items.map(m => `<tr><td><bdi>${escapeHtml(m.id)}</bdi></td><td>${escapeHtml(m.origin)}</td><td>${escapeHtml(m.destination)}</td><td><bdi>${escapeHtml(m.robot)}</bdi></td><td class="${Object.hasOwn(statusLabels,m.status) ? m.status : ''}">${statusLabels[m.status] || 'نامشخص'}</td><td>${escapeHtml(formatTime(m.started_at))}</td><td>${priorityLabels[m.priority] || 'عادی'}</td><td>${number.format(m.progress || 0)}٪</td><td>${missionActions(m)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">مأموریتی برای نمایش وجود ندارد.</td></tr>';
+  }
+  function renderQueue(queue) {
+    $('queueCount').textContent = queue.length ? `${number.format(queue.length)} مأموریت در انتظار` : '';
+    $('queueList').innerHTML = queue.length ? queue.map((item, index) => `<div class="queue-item"><span><bdi>${number.format(index + 1)}</bdi> · <bdi>${escapeHtml(item.id)}</bdi> — ${escapeHtml(item.origin)} → ${escapeHtml(item.destination)}</span><span class="pill">${priorityLabels[item.priority] || 'عادی'}</span></div>`).join('') : '<p class="empty">صف خالی است.</p>';
+  }
+  function renderAnalytics(data) {
+    const statuses = Object.entries(data.missions.by_status).map(([key, value]) => `${statusLabels[key] || key}: ${number.format(value)}`).join(' · ') || 'داده‌ای ثبت نشده';
+    const peak = Math.max(1, ...data.telemetry.daily.map(day => day.samples));
+    const bars = data.telemetry.daily.map(day => `<span style="height:${Math.round(day.samples / peak * 100)}%" title="${escapeHtml(day.day)}: ${number.format(day.samples)} نمونه"></span>`).join('');
+    const busiest = data.fleet.busiest.map(row => `<bdi>${escapeHtml(row.robot_id)}</bdi>: ${number.format(row.moving_samples)}`).join(' · ') || '—';
+    const share = data.fleet.moving_sample_share_percent;
+    $('analyticsBody').innerHTML = `<p>نرخ تکمیل مأموریت: <strong>${data.missions.completion_rate_percent === null ? '—' : number.format(data.missions.completion_rate_percent) + '٪'}</strong></p><p class="muted">مأموریت‌ها — ${statuses}</p><div class="bars" role="img" aria-label="نمونه‌های تله‌متری روزانه">${bars || '<span></span>'}</div><p class="muted">سهم نمونه‌های حرکت (تخمینی): ${share === null ? '—' : number.format(share) + '٪'}</p><p class="muted">فعال‌ترین ربات‌ها: ${busiest}</p>`;
+  }
+  function renderAudit(entries) {
+    $('auditRows').innerHTML = entries.map(entry => `<tr><td>${escapeHtml(formatTime(entry.recorded_at))}</td><td><bdi>${escapeHtml(entry.actor)}</bdi></td><td><bdi>${escapeHtml(entry.action)}</bdi></td><td><bdi>${escapeHtml(entry.subject)}</bdi></td><td>${escapeHtml(entry.detail || '—')}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">اقدامی ثبت نشده است.</td></tr>';
+  }
+  async function loadPanels() {
+    try {
+      const [queue, analyticsData, audit] = await Promise.all([request('/api/missions/queue'), request(`/api/analytics?days=${encodeURIComponent($('analyticsPeriod').value)}`), request('/api/audit?limit=20')]);
+      renderQueue(queue.queue); renderAnalytics(analyticsData); renderAudit(audit.entries);
+    } catch (error) { notify('دریافت صف، تحلیل یا ممیزی ناموفق بود.'); }
   }
   function chargeAction(robot) {
     const needsCharge = !robot.stale && robot.status === 'waiting' && Number(robot.battery) <= 25;
@@ -150,6 +178,7 @@
         $('lastUpdated').textContent = `آخرین دریافت: ${lastSuccess.toLocaleString('fa-IR', {timeZone:'Asia/Tehran'})} (تهران) · به‌روزرسانی هر ۱۵ ثانیه`;
         renderRobots();
         renderAlerts(alertData.alerts);
+        loadPanels();
         if (showNotice) notify('داده‌ها دریافت شدند.');
         return true;
       } catch (error) {
@@ -188,7 +217,7 @@
     $('createFields').hidden = mode !== 'create'; $('assignFields').hidden = mode !== 'assign';
     $('origin').disabled = $('destination').disabled = mode !== 'create'; $('robotChoice').disabled = mode !== 'assign';
     $('robotChoice').required = mode === 'assign';
-    $('dialogTitle').textContent = {create:'مأموریت جدید',assign:'تخصیص ربات',cancel:'لغو مأموریت'}[mode];
+    $('dialogTitle').textContent = {create:'مأموریت جدید',assign:'تخصیص ربات',cancel:'لغو مأموریت',complete:'تکمیل مأموریت'}[mode];
     $('dialogDescription').textContent = mode === 'cancel' ? `مأموریت ${missionId} لغو شود؟ لغو فقط برای مأموریت در صف مجاز است.` : missionId;
     $('submitMission').textContent = {create:'ثبت مأموریت',assign:'تأیید تخصیص',cancel:'تأیید لغو'}[mode];
     $('robotChoice').replaceChildren();
@@ -224,7 +253,7 @@
       $('missionDialog').close();
       if (refreshing) await refreshing;
       const refreshed = await refreshOverview();
-      const assigned = action === 'assign' && result && result.mission ? `مأموریت به ${result.mission.robot} سپرده شد.` : (action === 'cancel' ? 'مأموریت لغو شد.' : 'مأموریت ثبت شد.');
+      const assigned = action === 'assign' && result && result.mission ? `مأموریت به ${result.mission.robot} سپرده شد.` : action === 'cancel' ? 'مأموریت لغو شد.' : action === 'complete' ? 'مأموریت تکمیل شد.' : 'مأموریت ثبت شد.';
       notify(refreshed ? assigned : 'عملیات ثبت شد، اما دریافت فهرست جدید ناموفق بود.');
     } catch (error) {
       $('formError').textContent = error.name === 'AbortError' || error instanceof TypeError ? 'پاسخ دریافت نشد؛ ممکن است عملیات ثبت شده باشد. پیش از تکرار، فهرست را به‌روزرسانی کنید.' : error.message;
@@ -243,6 +272,7 @@
   }
   $('robotRows').addEventListener('click', event => { const button = event.target.closest('[data-charge]'); if (button && !button.disabled) sendToCharge(button.dataset.charge); });
   $('refresh').addEventListener('click', () => refreshOverview(true));
+  $('analyticsPeriod').addEventListener('change', loadPanels);
   $('newMission').addEventListener('click', () => openMission('create'));
   $('missionSearch').addEventListener('input', renderMissions); $('statusFilter').addEventListener('change', renderMissions);
   $('missionRows').addEventListener('click', event => { const button = event.target.closest('[data-action]'); if (button && !button.disabled) openMission(button.dataset.action, button.dataset.id); });

@@ -11,11 +11,15 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import charging
 import dispatch
 import traffic
 import vda5050
+import analytics
+import queueing
+
 from navigation import shortest_path
 from integration import decode_event, valid_signature
 
@@ -38,7 +42,7 @@ SEED_ROBOTS = (
     ("R-04", "waiting", 64, 57, 59),
     ("R-12", "charging", 91, 28, 76),
 )
-MISSION_PATH = re.compile(r"^/api/missions/(\d+)/(assign|cancel)$")
+MISSION_PATH = re.compile(r"^/api/missions/(\d+)/(assign|cancel|complete)$")
 DISPATCH_PATH = re.compile(r"^/api/missions/(\d+)/dispatch$")
 ROBOT_CHARGE_PATH = re.compile(r"^/api/robots/([^/]+)/charge$")
 
@@ -113,6 +117,18 @@ def initialize_db() -> None:
             node_id TEXT PRIMARY KEY, robot_id TEXT NOT NULL, mission_id INTEGER,
             held_until REAL NOT NULL, acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(node_id) REFERENCES map_nodes(id))""")
+        # Audit rows are append-only by convention: no endpoint updates or
+        # deletes them, so an operator can reconstruct who changed what.
+        db.execute("""CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL,
+            subject TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+            recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        # Zone rules are site configuration: speed is advisory for the robot,
+        # restricted is enforced here by blocking routing through the node.
+        db.execute("""CREATE TABLE IF NOT EXISTS zone_rules (
+            node_id TEXT PRIMARY KEY, max_speed INTEGER, restricted INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(node_id) REFERENCES map_nodes(id))""")
         db.execute("""CREATE TABLE IF NOT EXISTS chargers (
             id TEXT PRIMARY KEY, name TEXT NOT NULL, x INTEGER, y INTEGER)""")
         # One robot per charger, enforced by the primary key like corridors.
@@ -135,6 +151,12 @@ def initialize_db() -> None:
                 "INSERT INTO robots(id, status, battery, x, y, heartbeat_at) VALUES (?, ?, ?, ?, ?, ?)",
                 ((*robot, time.time()) for robot in SEED_ROBOTS),
             )
+
+
+def audit(db: sqlite3.Connection, actor: Any, action: str, subject: str, detail: str = "") -> None:
+    """Append one audit row. Caller supplies the actor; it is not inferred."""
+    name = actor if isinstance(actor, str) and actor.strip() else "operator"
+    db.execute("INSERT INTO audit_log(actor, action, subject, detail) VALUES (?, ?, ?, ?)", (name.strip(), action, subject, detail))
 
 
 def mission_payload(row: sqlite3.Row) -> dict[str, Any]:
@@ -447,6 +469,9 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             return None
 
+    def _query(self) -> dict[str, list[str]]:
+        return parse_qs(getattr(self, "query_string", ""))
+
     def do_OPTIONS(self) -> None:
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -455,6 +480,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
+        # do_GET strips the query string below, so keep it for ?days=/?limit=.
+        self.query_string = urlsplit(self.path).query
         path = self.path.split("?", 1)[0]
         dispatch_get = DISPATCH_PATH.match(path)
         if dispatch_get:
@@ -488,6 +515,12 @@ class Handler(BaseHTTPRequestHandler):
             self.get_report()
         elif self.path == "/api/chargers":
             self.get_chargers()
+        elif self.path == "/api/missions/queue":
+            self.get_queue()
+        elif self.path == "/api/audit":
+            self.get_audit(self._query())
+        elif self.path == "/api/analytics":
+            self.get_analytics(self._query())
         else:
             self._send(404, {"error": "route_not_found"})
 
@@ -515,6 +548,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/map/route":
             self.calculate_route(payload)
             return
+        if path == "/api/map/rules":
+            self.set_zone_rule(payload)
+            return
         if path == "/api/chargers":
             self.add_charger(payload)
             return
@@ -530,8 +566,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         match = MISSION_PATH.match(path)
         if match:
-            command = match.group(2)
-            self.assign_mission(int(match.group(1)), payload) if command == "assign" else self.cancel_mission(int(match.group(1)))
+            command, mission_id = match.group(2), int(match.group(1))
+            if command == "assign":
+                self.assign_mission(mission_id, payload)
+            elif command == "cancel":
+                self.cancel_mission(mission_id, payload)
+            else:
+                self.complete_mission(mission_id, payload)
         else:
             self._send(404, {"error": "route_not_found"})
 
@@ -621,6 +662,86 @@ class Handler(BaseHTTPRequestHandler):
                 db.execute("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", (next_id, data["origin"].strip(), data["destination"].strip(), UNASSIGNED_ROBOT, "waiting", "اکنون"))
                 db.execute("INSERT INTO mission_details(mission_id, source) VALUES (?, 'wms')", (next_id,))
         self._send(200, {"accepted": True, "duplicate": not bool(inserted)})
+
+    def get_queue(self) -> None:
+        """Waiting missions in dispatch order, so "next" means the same thing everywhere."""
+        with connection() as db:
+            rows = db.execute("SELECT * FROM missions WHERE status = 'waiting'").fetchall()
+        self._send(200, {"queue": queueing.order_missions([mission_payload(row) for row in rows])})
+
+    def complete_mission(self, mission_id: int, payload: Any) -> None:
+        """Close a running mission, free its robot and release leased corridors."""
+        body = payload if isinstance(payload, dict) else {}
+        with connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            mission = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
+            if mission is None:
+                self._send(404, {"error": "mission_not_found"})
+                return
+            if mission["status"] != "running":
+                self._send(409, {"error": "only_running_missions_can_complete"})
+                return
+            db.execute("UPDATE missions SET status = 'done' WHERE id = ?", (mission_id,))
+            db.execute("UPDATE mission_details SET progress = 100 WHERE mission_id = ?", (mission_id,))
+            robot_id = mission["robot"]
+            if robot_id != UNASSIGNED_ROBOT:
+                # A robot that finished work is idle again unless it is charging
+                # or has gone stale; both are left to their own state machines.
+                db.execute("UPDATE robots SET status = 'waiting', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'moving'", (robot_id,))
+            released = release_reservations(db, mission_id=mission_id)
+            audit(db, body.get("actor"), "mission.complete", f"M-{mission_id}", f"robot={robot_id};released_nodes={released}")
+            row = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
+        self._send(200, {"mission": mission_payload(row), "released_nodes": released})
+
+    def set_zone_rule(self, payload: Any) -> None:
+        body = payload if isinstance(payload, dict) else {}
+        node_id = body.get("node_id")
+        max_speed = body.get("max_speed")
+        restricted = body.get("restricted", False)
+        if (not isinstance(node_id, str) or not node_id.strip()
+                or (max_speed is not None and (type(max_speed) is not int or not 0 <= max_speed <= 100))
+                or not isinstance(restricted, bool)):
+            self._send(422, {"error": "invalid_zone_rule"})
+            return
+        with connection() as db:
+            if db.execute("SELECT 1 FROM map_nodes WHERE id = ?", (node_id,)).fetchone() is None:
+                self._send(404, {"error": "map_node_not_found"})
+                return
+            db.execute("INSERT OR REPLACE INTO zone_rules(node_id, max_speed, restricted) VALUES (?, ?, ?)", (node_id, max_speed, int(restricted)))
+            # Routing already honours map_obstacles, so a restricted zone is
+            # enforced through that existing mechanism rather than a second one.
+            db.execute("INSERT OR REPLACE INTO map_obstacles(node_id, active) VALUES (?, ?)", (node_id, int(restricted)))
+            audit(db, body.get("actor"), "zone.rule", node_id, f"max_speed={max_speed};restricted={restricted}")
+        self._send(200, {"node_id": node_id, "max_speed": max_speed, "restricted": restricted,
+                         "routing_enforced": restricted, "speed_enforced": False})
+
+    def get_audit(self, query: dict[str, list[str]]) -> None:
+        limit = query.get("limit", ["50"])[0]
+        if not limit.isdigit() or not 1 <= int(limit) <= 500:
+            self._send(422, {"error": "invalid_limit"})
+            return
+        with connection() as db:
+            rows = db.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
+        self._send(200, {"entries": [dict(row) for row in rows]})
+
+    def get_analytics(self, query: dict[str, list[str]]) -> None:
+        days = query.get("days", ["7"])[0]
+        if not days.isdigit() or not 1 <= int(days) <= 90:
+            self._send(422, {"error": "invalid_period"})
+            return
+        window = f"-{int(days)} days"
+        with connection() as db:
+            statuses = {row["status"]: row["count"] for row in db.execute("SELECT status, COUNT(*) AS count FROM missions GROUP BY status")}
+            daily = [dict(row) for row in db.execute(
+                """SELECT substr(recorded_at, 1, 10) AS day, COUNT(*) AS samples FROM telemetry_history
+                   WHERE recorded_at >= datetime('now', ?) GROUP BY day ORDER BY day""", (window,))]
+            busy = [dict(row) for row in db.execute(
+                """SELECT robot_id, COUNT(*) AS samples FROM telemetry_history
+                   WHERE recorded_at >= datetime('now', ?) AND status = 'moving'
+                   GROUP BY robot_id ORDER BY samples DESC, robot_id LIMIT 10""", (window,))]
+            robots = db.execute("SELECT COUNT(*) FROM robots").fetchone()[0]
+        self._send(200, analytics.summarize(mission_statuses=statuses, throughput_rows=daily, busy_rows=busy,
+                                            robot_count=robots, days=int(days)))
 
     def get_alerts(self) -> None:
         now = time.time()
@@ -799,6 +920,7 @@ class Handler(BaseHTTPRequestHandler):
             next_id = db.execute("SELECT COALESCE(MAX(id), 2048) + 1 FROM missions").fetchone()[0]
             db.execute("INSERT INTO missions VALUES (?, ?, ?, ?, ?, ?)", (next_id, payload["origin"].strip(), payload["destination"].strip(), UNASSIGNED_ROBOT, "waiting", "اکنون"))
             db.execute("INSERT INTO mission_details(mission_id, cargo, priority, deadline, source) VALUES (?, ?, ?, ?, ?)", (next_id, cargo.strip(), priority, deadline, source))
+            audit(db, payload.get("actor"), "mission.create", f"M-{next_id}", f"source={source};priority={priority}")
             row = db.execute("SELECT * FROM missions WHERE id = ?", (next_id,)).fetchone()
         self._send(201, {"mission": mission_payload(row)})
 
@@ -833,6 +955,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(409, {"error": "robot_offline"})
                 return
             db.execute("UPDATE missions SET robot = ?, status = 'running', started_at = 'اکنون' WHERE id = ?", (robot["id"], mission_id))
+            db.execute("INSERT OR IGNORE INTO mission_details(mission_id) VALUES (?)", (mission_id,))
+            db.execute("UPDATE mission_details SET progress = 25 WHERE mission_id = ?", (mission_id,))
+            audit(db, body.get("actor"), "mission.assign", f"M-{mission_id}", f"robot={robot['id']};auto={auto}")
             row = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
             traffic_result = lease_mission_route(db, mission_id, robot["id"], mission["origin"], mission["destination"], time.time())
         response: dict[str, Any] = {"mission": mission_payload(row)}
@@ -863,7 +988,7 @@ class Handler(BaseHTTPRequestHandler):
             result = dispatch_preview(mission)
         self._send(200, {"mission": mission_payload(mission), "dispatch": result})
 
-    def cancel_mission(self, mission_id: int) -> None:
+    def cancel_mission(self, mission_id: int, payload: Any = None) -> None:
         with connection() as db:
             db.execute("BEGIN IMMEDIATE")
             mission = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
@@ -875,6 +1000,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             db.execute("UPDATE missions SET status = 'cancelled' WHERE id = ?", (mission_id,))
             released = release_reservations(db, mission_id=mission_id)
+            audit(db, (payload or {}).get("actor") if isinstance(payload, dict) else None, "mission.cancel", f"M-{mission_id}", f"released_nodes={released}")
             row = db.execute("SELECT * FROM missions WHERE id = ?", (mission_id,)).fetchone()
         self._send(200, {"mission": mission_payload(row), "released_nodes": released})
 

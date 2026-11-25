@@ -609,6 +609,66 @@ class ChargeQueueTests(OperationsFixture):
         self.assertEqual(stuck[0]['reason'], 'critical')
         self.assertEqual(stuck[0]['severity'], 'critical')
 
+    def test_queue_endpoint_orders_waiting_missions(self):
+        for priority, deadline in (('low', None), ('urgent', None), ('high', '2026-11-30')):
+            self.assertEqual(self.post('/api/missions', {'origin': 'A', 'destination': 'B', 'priority': priority, 'deadline': deadline})[0], 201)
+        status, data = self.get('/api/missions/queue')
+        self.assertEqual(status, 200)
+        priorities = [item['priority'] for item in data['queue']]
+        self.assertLess(priorities.index('urgent'), priorities.index('high'))
+        self.assertLess(priorities.index('high'), priorities.index('low'))
+        self.assertTrue(all(item['status'] == 'waiting' for item in data['queue']))
+
+    def test_complete_frees_robot_and_writes_audit(self):
+        self.assertEqual(self.post('/api/missions', {'origin': 'A', 'destination': 'B'})[0], 201)
+        created = self.get('/api/missions/queue')[1]['queue'][0]['id']
+        number = created.replace('M-', '')
+        status, assigned = self.post(f'/api/missions/{number}/assign', {'robot': 'R-04', 'actor': 'supervisor'})
+        self.assertEqual(status, 200)
+        self.assertEqual(assigned['mission']['progress'], 25)
+        status, done = self.post(f'/api/missions/{number}/complete', {'actor': 'supervisor'})
+        self.assertEqual(status, 200)
+        self.assertEqual(done['mission']['status'], 'done')
+        self.assertEqual(done['mission']['progress'], 100)
+        _, robots = self.get('/api/robots')
+        self.assertEqual({row['id']: row['status'] for row in robots['robots']}['R-04'], 'waiting')
+        _, audit = self.get('/api/audit?limit=5')
+        actions = [entry['action'] for entry in audit['entries']]
+        self.assertEqual(actions[0], 'mission.complete')
+        self.assertIn('mission.assign', actions)
+        by_action = {entry['action']: entry['actor'] for entry in audit['entries']}
+        self.assertEqual(by_action['mission.complete'], 'supervisor')
+        self.assertEqual(by_action['mission.assign'], 'supervisor')
+
+    def test_complete_rejects_non_running_mission(self):
+        status, _ = self.post('/api/missions/2046/complete', {})
+        self.assertEqual(status, 409)
+
+    def test_zone_rule_enforces_routing_and_validates_speed(self):
+        for node in (('Z1', 'zone'), ('S1', 'station'), ('S2', 'station')):
+            self.assertEqual(self.post('/api/map/nodes', {'id': node[0], 'kind': node[1], 'name': node[0]})[0], 201)
+        for edge in ({'source': 'S1', 'target': 'Z1'}, {'source': 'Z1', 'target': 'S2'}):
+            self.assertEqual(self.post('/api/map/edges', edge)[0], 201)
+        self.assertEqual(self.post('/api/map/route', {'start': 'S1', 'goal': 'S2'})[0], 200)
+        self.assertEqual(self.post('/api/map/rules', {'node_id': 'Z1', 'max_speed': 101})[0], 422)
+        status, rule = self.post('/api/map/rules', {'node_id': 'Z1', 'max_speed': 40, 'restricted': True, 'actor': 'supervisor'})
+        self.assertEqual(status, 200)
+        self.assertTrue(rule['routing_enforced'])
+        self.assertFalse(rule['speed_enforced'])
+        self.assertEqual(self.post('/api/map/route', {'start': 'S1', 'goal': 'S2'})[0], 409)
+        _, audit = self.get('/api/audit?limit=1')
+        self.assertEqual(audit['entries'][0]['action'], 'zone.rule')
+
+    def test_analytics_and_audit_validate_parameters(self):
+        self.assertEqual(self.post('/api/telemetry', {'id': 'R-07', 'status': 'moving', 'battery': 60, 'position': {'x': 20, 'y': 30}})[0], 200)
+        status, data = self.get('/api/analytics?days=7')
+        self.assertEqual(status, 200)
+        self.assertEqual(data['days'], 7)
+        self.assertEqual(len(data['telemetry']['daily']), 1)
+        self.assertIn('definitions', data)
+        for path in ('/api/analytics?days=0', '/api/analytics?days=abc', '/api/audit?limit=0', '/api/audit?limit=501'):
+            self.assertEqual(self.get(path)[0], 422, path)
+
 
 if __name__ == '__main__':
     unittest.main()
